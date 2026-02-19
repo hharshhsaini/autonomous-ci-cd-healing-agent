@@ -5,15 +5,13 @@ from typing import Dict
 from ..state import AgentState
 
 def detect_language(repo_path: str) -> str:
-    """Detect primary language in repository."""
-    counts = {"python": 0, "javascript": 0, "typescript": 0, "java": 0, "go": 0, "rust": 0}
+    """Detect primary language - supports Python, JS, TS, Go only."""
+    counts = {"python": 0, "javascript": 0, "typescript": 0, "go": 0}
     ext_map = {
         ".py": "python",
         ".js": "javascript", ".jsx": "javascript",
         ".ts": "typescript", ".tsx": "typescript",
-        ".java": "java",
-        ".go": "go",
-        ".rs": "rust"
+        ".go": "go"
     }
     skip_dirs = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build', '.next'}
     
@@ -27,10 +25,11 @@ def detect_language(repo_path: str) -> str:
     return max(counts, key=counts.get) if any(counts.values()) else "python"
 
 def run_tests(state: AgentState) -> Dict:
-    """Run tests directly on the repository."""
+    """Run tests - supports Python, JavaScript, TypeScript, React, Go."""
     lang = detect_language(state["repo_path"])
     repo_path = state["repo_path"]
     output = ""
+    skip_dirs = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build', '.next'}
     
     print(f"[TEST] Detected language: {lang}")
     print(f"[TEST] Running tests in: {repo_path}")
@@ -82,11 +81,40 @@ def run_tests(state: AgentState) -> Dict:
                 output += f"pytest not available or failed: {str(e)}\n"
         
         elif lang in ("javascript", "typescript"):
+            # Run Node.js syntax check
+            output += "=NODE_SYNTAX=\n"
+            try:
+                js_files = []
+                for root, dirs, files in os.walk(repo_path):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs]
+                    for f in files:
+                        if f.endswith(('.js', '.jsx')):
+                            js_files.append(os.path.join(root, f))
+                
+                syntax_errors = 0
+                for file_path in js_files[:50]:  # Check max 50 files
+                    result = subprocess.run(
+                        ["node", "--check", file_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode != 0:
+                        rel_path = os.path.relpath(file_path, repo_path)
+                        output += f"{rel_path}:\n{result.stderr}\n"
+                        syntax_errors += 1
+                
+                if syntax_errors == 0:
+                    output += f"Checked {min(len(js_files), 50)} files - all have valid syntax\n"
+            except Exception as e:
+                output += f"Node syntax check failed: {str(e)}\n"
+            
             # Run ESLint
-            output += "=ESLINT=\n"
+            output += "\n=ESLINT=\n"
             try:
                 result = subprocess.run(
-                    ["npx", "--yes", "eslint", ".", "--ext", ".js,.jsx,.ts,.tsx", "--format", "compact"],
+                    ["npx", "--yes", "eslint@8", ".", "--ext", ".js,.jsx,.ts,.tsx", 
+                     "--format", "compact", "--no-eslintrc"],
                     cwd=repo_path,
                     capture_output=True,
                     text=True,
@@ -125,7 +153,7 @@ def run_tests(state: AgentState) -> Dict:
                 output += f"TypeScript check not available or failed: {str(e)}\n"
         
         elif lang == "go":
-            # Run go build first to catch compile errors
+            # Run go build
             output += "=GOBUILD=\n"
             try:
                 result = subprocess.run(
@@ -139,7 +167,7 @@ def run_tests(state: AgentState) -> Dict:
             except Exception as e:
                 output += f"go build failed: {str(e)}\n"
             
-            # Run go vet for static analysis
+            # Run go vet
             output += "\n=GOVET=\n"
             try:
                 result = subprocess.run(
@@ -153,7 +181,7 @@ def run_tests(state: AgentState) -> Dict:
             except Exception as e:
                 output += f"go vet failed: {str(e)}\n"
             
-            # Run go test with verbose output
+            # Run go test
             output += "\n=GOTEST=\n"
             try:
                 result = subprocess.run(
@@ -167,7 +195,7 @@ def run_tests(state: AgentState) -> Dict:
             except Exception as e:
                 output += f"go test failed: {str(e)}\n"
             
-            # Run gofmt check for formatting issues
+            # Run gofmt
             output += "\n=GOFMT=\n"
             try:
                 result = subprocess.run(
@@ -185,39 +213,8 @@ def run_tests(state: AgentState) -> Dict:
             except Exception as e:
                 output += f"gofmt failed: {str(e)}\n"
         
-        elif lang == "java":
-            # Run javac
-            output += "=JAVAC=\n"
-            try:
-                result = subprocess.run(
-                    ["javac", "-Xlint", "**/*.java"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                output += result.stdout + result.stderr
-            except Exception as e:
-                output += f"javac not available or failed: {str(e)}\n"
-        
-        elif lang == "rust":
-            # Run cargo check
-            output += "=RUSTCHECK=\n"
-            try:
-                result = subprocess.run(
-                    ["cargo", "check"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
-                output += result.stdout + result.stderr
-            except Exception as e:
-                output += f"cargo check not available or failed: {str(e)}\n"
-        
         else:
-            # For other languages, just mark as tested
-            output = f"=INFO=\nLanguage {lang} detected but no tests configured yet.\n"
+            output = f"=INFO=\nLanguage {lang} not supported. Only Python, JavaScript, TypeScript (React), and Go are supported.\n"
     
     except Exception as e:
         output = f"ERROR: Test execution failed: {str(e)}"

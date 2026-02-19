@@ -12,9 +12,7 @@ SYSTEM_PROMPTS = {
     "python": "You are an expert Python developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation, no code blocks. Raw Python only.",
     "javascript": "You are an expert JavaScript developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation. Raw JavaScript only.",
     "typescript": "You are an expert TypeScript developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation. Raw TypeScript only.",
-    "java": "You are an expert Java developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation. Raw Java only.",
     "go": "You are an expert Go developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation. Raw Go only.",
-    "rust": "You are an expert Rust developer. Fix the errors. Return ONLY the complete corrected file. No markdown, no explanation. Raw Rust only.",
 }
 
 def get_ai_client() -> Tuple[Optional[OpenAI], Optional[str], str]:

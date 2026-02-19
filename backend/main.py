@@ -5,8 +5,10 @@ Optimized FastAPI server with:
 - Cached regex patterns
 - Minimal string operations
 - Efficient JSON serialization
+- GitHub OAuth and token-based auth
+- SQLite database for persistence
 """
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -21,8 +23,14 @@ import pathlib
 import time
 import subprocess
 import re
+import httpx
+
+from database import init_db, save_user, get_user_by_github_id, save_run, get_user_runs
 
 load_dotenv()
+
+# Initialize database
+init_db()
 
 app = FastAPI(title="RIFT Healing Agent")
 
@@ -111,6 +119,7 @@ async def run_agent(req: RunRequest, bg: BackgroundTasks):
     if url_error:
         return JSONResponse(status_code=400, content={"detail": url_error})
     
+    # Use hardcoded GitHub token from .env
     github_token = os.getenv("GITHUB_TOKEN")
     if not github_token:
         return JSONResponse(status_code=500, content={"detail": "GitHub token not configured"})
@@ -249,7 +258,7 @@ def archive_job(job_id: str):
     completed_jobs.appendleft(job_data)
 
 def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
-    """Run pipeline with error handling."""
+    """Run pipeline with error handling and database save."""
     try:
         jobs[job_id]["status"] = "cloning"
         jobs[job_id]["progress"] = 5
@@ -265,6 +274,29 @@ def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
             team_name=req.team_name,
             leader_name=req.leader_name
         )
+        
+        # Save to database (with default user_id = 1)
+        try:
+            if job_id in jobs:
+                # Ensure default user exists
+                from database import save_user, save_run
+                
+                # Create/get default user
+                default_user_id = save_user(
+                    github_id="default",
+                    username="default_user",
+                    email="",
+                    avatar_url="",
+                    github_token=github_token
+                )
+                
+                # Save run to database
+                save_run(job_id, default_user_id, jobs[job_id])
+                print(f"[DB] Saved run {job_id} to database")
+        except Exception as db_error:
+            print(f"[DB] Failed to save to database: {db_error}")
+            # Don't fail the whole pipeline if DB save fails
+            
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error_message"] = str(e)
@@ -281,6 +313,19 @@ async def health():
     """Fast health check."""
     return {"status": "ok", "active_jobs": len(jobs)}
 
+@app.get("/api/test-github")
+async def test_github():
+    """Test GitHub API connectivity."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.github.com/zen",
+                timeout=5.0
+            )
+            return {"status": "ok", "github_reachable": response.status_code == 200, "message": response.text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/api/jobs")
 async def list_jobs():
     """List active jobs - O(1) dict access."""
@@ -290,6 +335,29 @@ async def list_jobs():
 async def list_runs():
     """Return completed runs - O(1) deque to list conversion."""
     return list(completed_jobs)
+
+@app.get("/api/db/runs")
+async def list_db_runs():
+    """Get runs from database."""
+    try:
+        from database import get_user_runs
+        # Get runs for default user (user_id = 1)
+        runs = get_user_runs(1, limit=50)
+        return runs
+    except Exception as e:
+        return {"error": str(e), "runs": []}
+
+@app.get("/api/db/run/{job_id}")
+async def get_db_run(job_id: str):
+    """Get specific run from database."""
+    try:
+        from database import get_run_details
+        run = get_run_details(job_id)
+        if run:
+            return run
+        return {"error": "Run not found"}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/stats")
 async def get_stats():

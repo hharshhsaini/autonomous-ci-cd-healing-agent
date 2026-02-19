@@ -28,7 +28,7 @@ def sanitize_branch_name(name: str) -> str:
     return name[:100]
 
 def push_to_branch(state: AgentState) -> Dict:
-    """Push fixes to a new branch and calculate final score."""
+    """Push fixes to a new branch with separate commits for each fix."""
     try:
         # Check if any fixes were actually applied
         fixes_applied = [f for f in state["fixes"] if f.get("status") == "fixed"]
@@ -81,53 +81,73 @@ def push_to_branch(state: AgentState) -> Dict:
         # Create new branch from detached HEAD
         repo.git.checkout("-b", safe_branch)
         
-        # Stage ALL changes (fixed files)
-        repo.git.add(A=True)
+        # Group fixes by file for efficient commits
+        fixes_by_file = {}
+        for fix in fixes_applied:
+            file_path = fix["file"]
+            if file_path not in fixes_by_file:
+                fixes_by_file[file_path] = []
+            fixes_by_file[file_path].append(fix)
         
-        # Check if we have any fixes that were applied
-        fixes_applied = [f for f in state["fixes"] if f.get("status") == "fixed"]
+        commit_count = state["commit_count"]
+        timeline_entries = []
         
-        # Commit if we have fixes OR if repo is dirty
-        if fixes_applied or repo.is_dirty(untracked_files=True):
-            # Build commit message from fixed error types
-            types_fixed = list(set(f["type"] for f in fixes_applied))
-            if types_fixed:
-                summary = ", ".join(types_fixed)
-                commit_msg = f"[AI-AGENT] Fix {len(fixes_applied)} errors: {summary}"
-            else:
-                commit_msg = f"[AI-AGENT] Apply code quality improvements"
-            
-            print(f"[PUSH] Committing: {commit_msg}")
-            repo.index.commit(commit_msg)
-            commit_count = state["commit_count"] + 1
-            print(f"[PUSH] ✓ Committed changes (total commits: {commit_count})")
-        else:
-            commit_count = state["commit_count"]
-            print(f"[PUSH] No changes to commit")
+        # Commit each file separately with its fixes
+        for file_path, file_fixes in fixes_by_file.items():
+            try:
+                # Stage only this specific file
+                repo.git.add(file_path)
+                
+                # Check if this file has changes
+                if repo.is_dirty(path=file_path):
+                    # Build commit message for this file's fixes
+                    fix_types = list(set(f["type"] for f in file_fixes))
+                    fix_summary = ", ".join(fix_types)
+                    
+                    commit_msg = f"[AI-AGENT] Fix {len(file_fixes)} {fix_summary} error(s) in {file_path}"
+                    
+                    print(f"[PUSH] Committing: {commit_msg}")
+                    repo.index.commit(commit_msg)
+                    commit_count += 1
+                    
+                    # Push this commit immediately to save tokens
+                    token = state.get("github_token", "")
+                    if not token:
+                        raise Exception("GitHub token not configured")
+                    
+                    remote_url = state["repo_url"].replace("https://", f"https://x-token:{token}@")
+                    origin = repo.remote("origin")
+                    origin.set_url(remote_url)
+                    
+                    print(f"[PUSH] Pushing commit {commit_count} to {safe_branch}...")
+                    origin.push(refspec=f"{safe_branch}:{safe_branch}", force=True)
+                    print(f"[PUSH] ✓ Pushed commit {commit_count}")
+                    
+                    timeline_entries.append({
+                        "agent": "Git Push Agent",
+                        "msg": f"✓ Committed and pushed fix for {file_path} ({len(file_fixes)} errors)",
+                        "timestamp": datetime.now().isoformat(),
+                        "iteration": state["retry_count"],
+                        "passed": True
+                    })
+                else:
+                    print(f"[PUSH] No changes in {file_path}, skipping")
+                    
+            except Exception as e:
+                print(f"[PUSH] ✗ Failed to commit {file_path}: {str(e)}")
+                timeline_entries.append({
+                    "agent": "Git Push Agent",
+                    "msg": f"✗ Failed to push {file_path}: {str(e)[:100]}",
+                    "timestamp": datetime.now().isoformat(),
+                    "iteration": state["retry_count"],
+                    "passed": False
+                })
         
-        # Push with token - MUST succeed for workflow to complete
-        token = state.get("github_token", "")
-        remote_url = state["repo_url"]
-        
-        if not token:
-            raise Exception("GitHub token not configured - cannot push to remote")
-        
-        # Inject token into URL
-        remote_url = remote_url.replace("https://", f"https://x-token:{token}@")
-        
-        # Push to remote - this MUST succeed
-        origin = repo.remote("origin")
-        origin.set_url(remote_url)
-        
-        print(f"[PUSH] Pushing branch {safe_branch} to {state['repo_url']}...")
-        origin.push(refspec=f"{safe_branch}:{safe_branch}", force=True)
-        print(f"[PUSH] ✓ Successfully pushed to branch {safe_branch}")
+        print(f"[PUSH] ✓ Successfully pushed {commit_count} commits to branch {safe_branch}")
         
         push_success = True
         
-        # CI status logic — CORRECT VERSION
-        # PASSED = no errors found, OR all errors were fixed
-        # FAILED = errors remain after max retries
+        # CI status logic
         if state["errors_found"] == 0:
             ci_status = "PASSED"
             verify_passed = True
@@ -171,7 +191,7 @@ def push_to_branch(state: AgentState) -> Dict:
             "push_success": push_success,
             "score": score,
             "fixes": state["fixes"],
-            "timeline": state["timeline"],
+            "timeline": state["timeline"] + timeline_entries,
             "repo_language": state.get("repo_language", "unknown")
         }
         
@@ -190,13 +210,7 @@ def push_to_branch(state: AgentState) -> Dict:
             "verify_passed": verify_passed,
             "ci_status": ci_status,
             "push_success": True,
-            "timeline": state["timeline"] + [{
-                "agent": "Git Push Agent",
-                "msg": f"✓ Committed {commit_count} change(s) and pushed to branch {safe_branch}",
-                "timestamp": datetime.now().isoformat(),
-                "iteration": state["retry_count"],
-                "passed": True
-            }]
+            "timeline": state["timeline"] + timeline_entries
         }
     
     except Exception as e:

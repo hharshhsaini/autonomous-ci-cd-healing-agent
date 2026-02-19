@@ -16,11 +16,15 @@ PATTERNS = {
     'jest_fail': re.compile(r'FAIL\s+(\S+)'),
     'jest_test': re.compile(r"● (.+?) › (.+)"),
     'jest_stack': re.compile(r'at\s+\S+\s+\(([^)]+?):(\d+):\d+\)'),
+    'node_syntax': re.compile(r"([^\n:]+):(\d+)\n(.+?)\n\s*\^\s*\n\s*(.+)"),
     'go_error': re.compile(r"\.?/?([^\n:]+\.go):(\d+):\d+: (.+)"),
     'go_test_fail': re.compile(r"--- FAIL: (\w+) \([^)]+\)\s+([^\n:]+\.go):(\d+): (.+)"),
     'go_fail_pkg': re.compile(r"FAIL\s+([^\s]+)\s+\[build failed\]"),
     'java_error': re.compile(r"([^\n:]+\.java):(\d+): error: (.+)"),
-    'rust_error': re.compile(r"error(?:\[E\d+\])?: (.+)\n\s+--> ([^\n:]+):(\d+)")
+    'java_maven': re.compile(r"\[ERROR\]\s+([^\[]+\.java):\[(\d+),\d+\]\s+(.+)"),
+    'java_gradle': re.compile(r"([^\n:]+\.java):(\d+): error: (.+)"),
+    'rust_error': re.compile(r"error(?:\[E\d+\])?: (.+)\n\s+--> ([^\n:]+):(\d+)"),
+    'rust_clippy': re.compile(r"warning: (.+)\n\s+--> ([^\n:]+):(\d+)")
 }
 
 # Pre-defined mappings for O(1) lookups
@@ -121,6 +125,8 @@ def parse_eslint(raw: str) -> List[Dict]:
         return []
     
     errors = []
+    
+    # Pattern 1: Standard ESLint format
     for m in PATTERNS['eslint'].finditer(raw):
         file, line, message, rule = m.groups()
         rule = rule.strip()
@@ -135,12 +141,72 @@ def parse_eslint(raw: str) -> List[Dict]:
                 btype, fix_desc = 'IMPORT', f"fix the {rule} issue"
             elif 'indent' in rule:
                 btype, fix_desc = 'INDENTATION', f"fix the {rule} issue"
-            elif 'syntax' in rule or 'parse' in rule:
-                btype, fix_desc = 'SYNTAX', f"fix the {rule} issue"
+            elif 'syntax' in rule or 'parse' in rule or 'Parsing error' in message:
+                btype, fix_desc = 'SYNTAX', f"fix the syntax error"
             else:
                 btype, fix_desc = 'LINTING', f"fix the {rule} issue"
         
         errors.append(build_fix_dict(btype, file.strip(), line, message.strip(), fix_desc))
+    
+    # Pattern 2: Simple format without rule name (for parsing errors)
+    # Format: file.js: line 10, col 21, Error - message
+    simple_pattern = re.compile(r"([^\n:]+\.[jt]sx?): line (\d+), col \d+, Error - (.+)")
+    for m in simple_pattern.finditer(raw):
+        file, line, message = m.groups()
+        line = int(line)
+        
+        if 'Parsing error' in message or 'Unexpected token' in message:
+            btype, fix_desc = 'SYNTAX', "fix the syntax error"
+        else:
+            btype, fix_desc = 'LINTING', "fix the linting issue"
+        
+        errors.append(build_fix_dict(btype, file.strip(), line, message.strip(), fix_desc))
+    
+    return errors
+
+def parse_node_syntax(raw: str) -> List[Dict]:
+    """Parse Node.js --check syntax errors."""
+    if not raw or '=NODE_SYNTAX=' not in raw:
+        return []
+    
+    errors = []
+    # Extract NODE_SYNTAX section
+    if '=NODE_SYNTAX=' in raw:
+        section_start = raw.find('=NODE_SYNTAX=') + len('=NODE_SYNTAX=')
+        section_end = raw.find('=ESLINT=', section_start)
+        if section_end == -1:
+            section_end = len(raw)
+        section = raw[section_start:section_end]
+        
+        # Parse each file's errors - format: file.js:\n/full/path/file.js:line\ncode\n^\nSyntaxError: message
+        lines = section.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Look for file path with line number: /path/file.js:10
+            if '.js:' in line and '/' in line and line[0] == '/':
+                try:
+                    # Extract file and line number
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        full_path = parts[0]
+                        line_num = int(parts[1]) if parts[1].isdigit() else 0
+                        
+                        # Get filename only
+                        file_name = full_path.split('/')[-1]
+                        
+                        # Look ahead for SyntaxError message
+                        error_msg = "Syntax error"
+                        for j in range(i+1, min(i+10, len(lines))):
+                            if 'SyntaxError:' in lines[j] or 'Error:' in lines[j]:
+                                error_msg = lines[j].strip()
+                                break
+                        
+                        errors.append(build_fix_dict("SYNTAX", file_name, line_num, error_msg, "fix the syntax error"))
+                except (ValueError, IndexError):
+                    pass
+            i += 1
     
     return errors
 
@@ -232,25 +298,66 @@ def parse_go(raw: str) -> List[Dict]:
     return errors
 
 def parse_java(raw: str) -> List[Dict]:
-    """Optimized Java parser - O(n) single pass."""
+    """Optimized Java parser - O(n) single pass. Handles javac, Maven, and Gradle."""
     if not raw:
         return []
     
-    return [
-        build_fix_dict("IMPORT" if "cannot find symbol" in m.group(3) else "SYNTAX",
-                      m.group(1).strip(), int(m.group(2)), m.group(3).strip(), "fix the Java compile error")
-        for m in PATTERNS['java_error'].finditer(raw)
-    ]
+    errors = []
+    
+    # Pattern 1: Maven errors [ERROR] path/File.java:[line,col] message
+    for m in PATTERNS['java_maven'].finditer(raw):
+        file, line, message = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
+        
+        if "cannot find symbol" in message or "package does not exist" in message:
+            error_type = "IMPORT"
+        elif "class, interface, or enum expected" in message:
+            error_type = "SYNTAX"
+        else:
+            error_type = "SYNTAX"
+        
+        errors.append(build_fix_dict(error_type, file, line, message, f"fix the {error_type.lower()} error"))
+    
+    # Pattern 2: Standard javac/Gradle errors path/File.java:line: error: message
+    for m in PATTERNS['java_error'].finditer(raw):
+        file, line, message = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
+        
+        if "cannot find symbol" in message or "package does not exist" in message:
+            error_type = "IMPORT"
+        elif "class, interface, or enum expected" in message:
+            error_type = "SYNTAX"
+        else:
+            error_type = "SYNTAX"
+        
+        errors.append(build_fix_dict(error_type, file, line, message, f"fix the {error_type.lower()} error"))
+    
+    return errors
 
 def parse_rust(raw: str) -> List[Dict]:
-    """Optimized Rust parser - O(n) single pass."""
+    """Optimized Rust parser - O(n) single pass. Handles cargo errors and clippy warnings."""
     if not raw:
         return []
     
-    return [
-        build_fix_dict("SYNTAX", m.group(2).strip(), int(m.group(3)), m.group(1).strip(), "fix the Rust compile error")
-        for m in PATTERNS['rust_error'].finditer(raw)
-    ]
+    errors = []
+    
+    # Pattern 1: Cargo compile errors
+    for m in PATTERNS['rust_error'].finditer(raw):
+        message, file, line = m.group(1).strip(), m.group(2).strip(), int(m.group(3))
+        
+        if "cannot find" in message or "unresolved import" in message:
+            error_type = "IMPORT"
+        elif "expected" in message and "found" in message:
+            error_type = "TYPE_ERROR"
+        else:
+            error_type = "SYNTAX"
+        
+        errors.append(build_fix_dict(error_type, file, line, message, f"fix the {error_type.lower()} error"))
+    
+    # Pattern 2: Clippy warnings (treat as linting)
+    for m in PATTERNS['rust_clippy'].finditer(raw):
+        message, file, line = m.group(1).strip(), m.group(2).strip(), int(m.group(3))
+        errors.append(build_fix_dict("LINTING", file, line, message, "fix the clippy warning"))
+    
+    return errors
 
 def deduplicate(fixes: List[Dict]) -> List[Dict]:
     """Optimized deduplication using set - O(n) time, O(n) space."""

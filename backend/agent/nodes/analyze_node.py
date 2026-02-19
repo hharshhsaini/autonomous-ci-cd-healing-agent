@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Dict
 from ..parsers import (
     parse_flake8, parse_mypy, parse_pytest,
-    parse_eslint, parse_tsc, parse_jest,
+    parse_eslint, parse_tsc, parse_jest, parse_node_syntax,
     parse_go, parse_java, parse_rust,
     deduplicate
 )
@@ -30,23 +30,16 @@ def analyze_errors(state: AgentState) -> Dict:
         fixes += parse_pytest(section("=PYTEST="))
     
     elif lang in ("javascript", "typescript"):
+        fixes += parse_node_syntax(section("=NODE_SYNTAX=", "=ESLINT="))
         fixes += parse_eslint(section("=ESLINT=", "=JEST="))
         fixes += parse_jest(section("=JEST=", "=TSCCHECK="))
         fixes += parse_tsc(section("=TSCCHECK="))
-    
-    elif lang == "java":
-        fixes += parse_java(section("=JAVAC=", "=MAVEN="))
-        fixes += parse_java(section("=MAVEN="))
     
     elif lang == "go":
         fixes += parse_go(section("=GOBUILD=", "=GOVET="))
         fixes += parse_go(section("=GOVET=", "=GOTEST="))
         fixes += parse_go(section("=GOTEST=", "=GOFMT="))
         fixes += parse_go(section("=GOFMT="))
-    
-    elif lang == "rust":
-        fixes += parse_rust(section("=RUSTCHECK=", "=RUSTEST="))
-        fixes += parse_rust(section("=RUSTEST="))
     
     fixes = deduplicate(fixes)[:50]  # Limit to max 50 errors
     unique_files = len(set(f['file'] for f in fixes)) if fixes else 0
