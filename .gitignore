@@ -63,3 +63,8 @@ backend/results/
 *.pid
 *.seed
 *.pid.lock
+
+# Database
+backend/data/
+data/
+*.db
