@@ -1,7 +1,7 @@
 """
 Optimized FastAPI server with:
-- O(1) job lookups using dict
-- O(1) completed jobs insertion with deque
+- O(1) job lookups using dict (active jobs only)
+- SQLite database for persistent storage of completed runs
 - Cached regex patterns
 - Minimal string operations
 - Efficient JSON serialization
@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from collections import deque
 from functools import lru_cache
 import asyncio
 import uuid
@@ -33,9 +32,18 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Optimized data structures
+# Database initialization
+from database import init_db, SessionLocal
+import crud
+
+@app.on_event("startup")
+def startup_event():
+    """Initialize database tables on server startup."""
+    init_db()
+    print("[STARTUP] Database initialized successfully")
+
+# In-memory store for ACTIVE jobs only (needed for SSE streaming)
 jobs: dict = {}  # O(1) lookup by job_id
-completed_jobs: deque = deque(maxlen=100)  # O(1) append, automatic size limit
 
 # Pre-compiled regex patterns for O(1) reuse
 URL_PATTERN = re.compile(r'^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$')
@@ -163,20 +171,24 @@ async def get_status(job_id: str):
 
 @app.get("/api/results/{job_id}")
 async def get_results(job_id: str):
-    """Optimized results lookup with file cache."""
-    # Check file cache first (fastest)
+    """Results lookup: in-memory → file cache → database."""
+    # Check active jobs first (O(1))
+    if job_id in jobs:
+        return jobs[job_id]
+    
+    # Check file cache
     path = pathlib.Path(f"results/{job_id}.json")
     if path.exists():
         return json.loads(path.read_text())
     
-    # Check active jobs (O(1))
-    if job_id in jobs:
-        return jobs[job_id]
-    
-    # Check completed archive (O(n) but limited to 100)
-    for run in completed_jobs:
-        if run.get("job_id") == job_id:
-            return run
+    # Check database (persistent storage)
+    db = SessionLocal()
+    try:
+        run = crud.get_run(db, job_id)
+        if run:
+            return run.to_dict()
+    finally:
+        db.close()
     
     return {"error": "Not found"}
 
@@ -215,19 +227,12 @@ async def stream(job_id: str):
     )
 
 def archive_job(job_id: str):
-    """Optimized job archiving with O(1) deque append."""
+    """Archive completed job to database for persistent storage."""
     if job_id not in jobs:
         return
     
     job_data = jobs[job_id].copy()
     job_data["job_id"] = job_id
-    
-    # Fast repo name extraction
-    repo_url = job_data.get("repo_url", "")
-    if "github.com/" in repo_url:
-        job_data["repo"] = repo_url.split("github.com/")[-1].replace(".git", "")
-    else:
-        job_data["repo"] = repo_url
     
     # Ensure timestamp
     if "timestamp" not in job_data:
@@ -245,8 +250,15 @@ def archive_job(job_id: str):
     if "total" not in job_data["score"]:
         job_data["score"]["total"] = job_data.get("errors_fixed", 0) * 10 + (20 if job_data.get("ci_status") == "PASSED" else 0)
     
-    # O(1) append with automatic size limit
-    completed_jobs.appendleft(job_data)
+    # Persist to database
+    db = SessionLocal()
+    try:
+        crud.save_completed_run(db, job_data)
+        print(f"[ARCHIVE] Job {job_id} saved to database")
+    except Exception as e:
+        print(f"[ARCHIVE] Error saving job {job_id} to DB: {e}")
+    finally:
+        db.close()
 
 def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
     """Run pipeline with error handling."""
@@ -288,97 +300,19 @@ async def list_jobs():
 
 @app.get("/api/runs")
 async def list_runs():
-    """Return completed runs - O(1) deque to list conversion."""
-    return list(completed_jobs)
+    """Return completed runs from database."""
+    db = SessionLocal()
+    try:
+        runs = crud.get_all_runs(db, limit=100)
+        return [r.to_dict() for r in runs]
+    finally:
+        db.close()
 
 @app.get("/api/stats")
 async def get_stats():
-    """Optimized stats computation with single-pass algorithms."""
-    runs = list(completed_jobs)
-    
-    if not runs:
-        return {
-            "successRate": 0,
-            "totalFixes": 0,
-            "avgFixTime": 0,
-            "byDay": {},
-            "byBugType": {},
-            "thisMonth": 0,
-            "lastMonth": 0,
-            "totalRuns": 0
-        }
-    
-    # Single-pass aggregation - O(n) instead of multiple O(n) passes
-    passed_count = 0
-    total_fixes = 0
-    total_time = 0.0
-    by_bug_type = {}
-    
-    import datetime
-    now = datetime.datetime.now()
-    this_month, this_year = now.month, now.year
-    last_month_num = 12 if this_month == 1 else this_month - 1
-    last_year = this_year - 1 if this_month == 1 else this_year
-    
-    this_month_runs = []
-    last_month_runs = []
-    
-    # Initialize by_day with O(1) dict
-    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    by_day = {day_names[(now.weekday() - i) % 7]: {"runs": 0, "fixes": 0} for i in range(6, -1, -1)}
-    
-    # Single pass through runs
-    for r in runs:
-        # Success rate
-        if r.get("ci_status") == "PASSED":
-            passed_count += 1
-        
-        # Total fixes
-        total_fixes += r.get("errors_fixed", 0)
-        
-        # Avg time
-        total_time += r.get("score", {}).get("elapsed_seconds", 0)
-        
-        # Bug types
-        fixes = r.get("fixes", [])
-        if isinstance(fixes, list):
-            for fix in fixes:
-                if isinstance(fix, dict):
-                    bug_type = fix.get("type", "UNKNOWN")
-                    by_bug_type[bug_type] = by_bug_type.get(bug_type, 0) + 1
-        
-        # By day and month
-        try:
-            ts = r.get("timestamp", "")
-            if ts:
-                dt = datetime.datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
-                dn = day_names[dt.weekday()]
-                
-                if dn in by_day:
-                    by_day[dn]["runs"] += 1
-                    by_day[dn]["fixes"] += r.get("errors_fixed", 0)
-                
-                if dt.month == this_month and dt.year == this_year:
-                    this_month_runs.append(r)
-                elif dt.month == last_month_num and dt.year == last_year:
-                    last_month_runs.append(r)
-        except Exception:
-            pass
-    
-    # Compute rates
-    success_rate = (passed_count / len(runs)) * 100 if runs else 0
-    avg_fix_time = total_time / len(runs) if runs else 0
-    
-    this_month_rate = (sum(1 for r in this_month_runs if r.get("ci_status") == "PASSED") / len(this_month_runs) * 100) if this_month_runs else 0
-    last_month_rate = (sum(1 for r in last_month_runs if r.get("ci_status") == "PASSED") / len(last_month_runs) * 100) if last_month_runs else 0
-    
-    return {
-        "successRate": round(success_rate, 1),
-        "totalFixes": total_fixes,
-        "avgFixTime": round(avg_fix_time, 1),
-        "byDay": by_day,
-        "byBugType": by_bug_type,
-        "thisMonth": round(this_month_rate, 1),
-        "lastMonth": round(last_month_rate, 1),
-        "totalRuns": len(runs)
-    }
+    """Dashboard stats computed from database."""
+    db = SessionLocal()
+    try:
+        return crud.get_stats(db)
+    finally:
+        db.close()
