@@ -39,8 +39,15 @@ def run_tests(state: AgentState) -> Dict:
             # Run flake8
             output += "=FLAKE8=\n"
             try:
+                # Try to find flake8 in PATH
+                flake8_cmd = "flake8"
+                # Check if flake8 exists
+                check_result = subprocess.run(["which", "flake8"], capture_output=True, text=True)
+                if check_result.returncode == 0:
+                    flake8_cmd = check_result.stdout.strip()
+                
                 result = subprocess.run(
-                    ["flake8", ".", "--max-line-length=120", 
+                    [flake8_cmd, ".", "--max-line-length=120", 
                      "--exclude=.git,__pycache__,node_modules,venv,dist,build",
                      "--format=%(path)s:%(row)d:%(col)d: %(code)s %(text)s"],
                     cwd=repo_path,
@@ -55,8 +62,14 @@ def run_tests(state: AgentState) -> Dict:
             # Run mypy
             output += "\n=MYPY=\n"
             try:
+                # Try to find mypy in PATH
+                mypy_cmd = "mypy"
+                check_result = subprocess.run(["which", "mypy"], capture_output=True, text=True)
+                if check_result.returncode == 0:
+                    mypy_cmd = check_result.stdout.strip()
+                
                 result = subprocess.run(
-                    ["mypy", ".", "--ignore-missing-imports"],
+                    [mypy_cmd, ".", "--ignore-missing-imports"],
                     cwd=repo_path,
                     capture_output=True,
                     text=True,
@@ -69,8 +82,14 @@ def run_tests(state: AgentState) -> Dict:
             # Run pytest
             output += "\n=PYTEST=\n"
             try:
+                # Try to find pytest in PATH
+                pytest_cmd = "pytest"
+                check_result = subprocess.run(["which", "pytest"], capture_output=True, text=True)
+                if check_result.returncode == 0:
+                    pytest_cmd = check_result.stdout.strip()
+                
                 result = subprocess.run(
-                    ["pytest", "--tb=short", "-q"],
+                    [pytest_cmd, "--tb=short", "-q"],
                     cwd=repo_path,
                     capture_output=True,
                     text=True,

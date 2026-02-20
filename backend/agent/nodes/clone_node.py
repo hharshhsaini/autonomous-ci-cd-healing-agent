@@ -20,6 +20,25 @@ def clone_repo(state: AgentState) -> Dict:
         # Clone repository
         git.Repo.clone_from(url, state["repo_path"])
         
+        # Check if repo was cloned into a nested folder (GitPython sometimes does this)
+        # If so, move contents up one level
+        repo_name = state["repo_url"].rstrip('/').split('/')[-1].replace('.git', '')
+        nested_path = os.path.join(state["repo_path"], repo_name)
+        
+        if os.path.exists(nested_path) and os.path.isdir(nested_path):
+            # Move all contents from nested folder to parent
+            for item in os.listdir(nested_path):
+                src = os.path.join(nested_path, item)
+                dst = os.path.join(state["repo_path"], item)
+                if os.path.exists(dst):
+                    if os.path.isdir(dst):
+                        shutil.rmtree(dst)
+                    else:
+                        os.remove(dst)
+                shutil.move(src, dst)
+            # Remove empty nested folder
+            os.rmdir(nested_path)
+        
         # Return only changed fields (LangGraph pattern)
         return {
             "repo_path": state["repo_path"],
