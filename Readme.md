@@ -1,8 +1,8 @@
-# 🚀 RIFT Healing Agent - Autonomous DevOps AI
+#  RIFT Healing Agent - Autonomous DevOps AI
 
 An intelligent multi-agent system that automatically fixes code errors, runs tests, and ensures CI/CD pipeline success.
 
-## 🎯 Features
+##  Features
 
 - **Autonomous Error Detection**: Automatically discovers and runs all test files
 - **Intelligent Fixing**: Uses GPT-4o to generate targeted fixes for failures
@@ -10,7 +10,7 @@ An intelligent multi-agent system that automatically fixes code errors, runs tes
 - **Multi-Language Support**: Python, JavaScript, TypeScript, Java, Go, Rust
 - **Production Dashboard**: Real-time React dashboard with comprehensive analytics
 
-## 🏗️ Architecture
+##  Architecture
 
 ### Multi-Agent System (LangGraph)
 1. **Clone Agent** - Clones repository
@@ -26,7 +26,7 @@ An intelligent multi-agent system that automatically fixes code errors, runs tes
 - **Frontend**: React + Vite + Recharts
 - **Deployment**: Docker + Docker Compose
 
-## 📊 Dashboard Features
+##  Dashboard Features
 
 ### 1. Input Section
 - GitHub Repository URL
@@ -67,7 +67,7 @@ Status: ✓ Fixed (green) | ✗ Failed (red)
 - Iteration count (e.g., "3/5")
 - Timestamps for each run
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
@@ -99,7 +99,7 @@ docker-compose up -d
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 
-## 📝 Branch Naming Convention
+##  Branch Naming Convention
 
 **Format**: `TEAMNAME_LEADERNAME_AI_Fix`
 
@@ -113,7 +113,7 @@ Examples:
 - Team: "RIFT ORGANISERS", Leader: "Saiyam Kumar" → `RIFT_ORGANISERS_SAIYAM_KUMAR_AI_Fix`
 - Team: "Code Warriors", Leader: "John Doe" → `CODE_WARRIORS_JOHN_DOE_AI_Fix`
 
-## 🔧 API Endpoints
+##  API Endpoints
 
 ### POST `/api/run-agent`
 Start a new healing agent run
@@ -145,7 +145,7 @@ Get final results including `results.json`
 ### GET `/api/health`
 Health check endpoint
 
-## 📊 Test Case Format
+##  Test Case Format
 
 The agent outputs match this EXACT format:
 
@@ -158,21 +158,21 @@ IMPORT error in src/db.py line 3 → Fix: fix missing import path
 INDENTATION error in src/config.py line 27 → Fix: fix indentation block
 ```
 
-## 🎯 Scoring System
+##  Scoring System
 
 - **Base Score**: 100 points
 - **Speed Bonus**: +10 points if completed in < 5 minutes
 - **Commit Penalty**: -2 points per commit over 20
 - **Maximum Score**: 110 points
 
-## 🔒 Security
+##  Security
 
 - Sandboxed code execution with timeouts
 - No Docker-in-Docker (direct subprocess execution)
 - Environment variable isolation
 - GitHub token with minimal required scopes
 
-## 📦 Project Structure
+##  Project Structure
 
 ```
 rift-healing-agent/
@@ -197,7 +197,7 @@ rift-healing-agent/
 └── README.md
 ```
 
-## 🧪 Testing
+##  Testing
 
 ```bash
 # Test with a sample repository
@@ -210,7 +210,7 @@ curl -X POST http://localhost:8000/api/run-agent \
   }'
 ```
 
-## 🚀 Deployment
+##  Deployment
 
 ### Frontend (Vercel/Netlify)
 ```bash
@@ -228,14 +228,19 @@ GITHUB_TOKEN=your-token
 # Deploy using Docker
 ```
 
-## 📄 License
+##  License
 
 MIT License
 
-## 👥 Team
+##  Team Name - Room no.518
+
+1. Harsh Saini (Leader)
+2. Anurag Singh
+3. Varun Yadav
+4. Aditya Chauhan
 
 Built for RIFT 2026 Hackathon
 
 ---
 
-**Status**: ✅ Production Ready | 🎯 Competition Compliant | 🚀 Fully Functional
+**Status**: Production Ready |  Competition Compliant |  Fully Functional
