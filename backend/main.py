@@ -5,8 +5,8 @@ Optimized FastAPI server with:
 - Cached regex patterns
 - Minimal string operations
 - Efficient JSON serialization
-- GitHub OAuth and token-based auth
-- SQLite database for persistence
+- GitHub OAuth authentication
+- Per-user GitHub token management
 """
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,10 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-
-# Database initialization
-from database import init_db, SessionLocal
-import crud
 
 @app.on_event("startup")
 def startup_event():
@@ -118,19 +114,155 @@ def clean_name(name: str) -> str:
     cleaned = CLEAN_PATTERN.sub('_', name.upper().replace(" ", "_"))
     return re.sub(r'_+', '_', cleaned).strip('_')
 
+# ─── GitHub OAuth Endpoints ───────────────────────────────────────
+
+class GitHubAuthRequest(BaseModel):
+    code: str
+
+class TokenVerifyRequest(BaseModel):
+    github_token: str
+
+@app.post("/api/auth/github")
+async def auth_github(req: GitHubAuthRequest):
+    """Exchange GitHub OAuth code for access token and save user."""
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        return JSONResponse(status_code=500, content={"detail": "GitHub OAuth not configured"})
+    
+    # Exchange code for token
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            json={"client_id": client_id, "client_secret": client_secret, "code": req.code},
+            headers={"Accept": "application/json"},
+            timeout=10.0
+        )
+        
+        if token_resp.status_code != 200:
+            return JSONResponse(status_code=400, content={"detail": "Failed to exchange code"})
+        
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        
+        if not access_token:
+            error = token_data.get("error_description", "No access token returned")
+            return JSONResponse(status_code=400, content={"detail": error})
+        
+        # Fetch user profile
+        user_resp = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            timeout=10.0
+        )
+        
+        if user_resp.status_code != 200:
+            return JSONResponse(status_code=400, content={"detail": "Failed to fetch GitHub user"})
+        
+        user_data = user_resp.json()
+    
+    # Save user to database
+    user_id = save_user(
+        github_id=str(user_data.get("id")),
+        username=user_data.get("login", ""),
+        email=user_data.get("email", ""),
+        avatar_url=user_data.get("avatar_url", ""),
+        github_token=access_token
+    )
+    
+    print(f"[AUTH] User {user_data.get('login')} logged in (id={user_id})")
+    
+    return {
+        "user_id": user_id,
+        "username": user_data.get("login"),
+        "avatar_url": user_data.get("avatar_url"),
+        "github_token": access_token
+    }
+
+@app.post("/api/auth/verify-token")
+async def verify_token(req: TokenVerifyRequest):
+    """Verify a GitHub token is valid."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {req.github_token}", "Accept": "application/json"},
+            timeout=10.0
+        )
+        
+        if resp.status_code != 200:
+            return JSONResponse(status_code=401, content={"detail": "Invalid GitHub token"})
+        
+        user_data = resp.json()
+        
+        # Save/update user in DB
+        user_id = save_user(
+            github_id=str(user_data.get("id")),
+            username=user_data.get("login", ""),
+            email=user_data.get("email", ""),
+            avatar_url=user_data.get("avatar_url", ""),
+            github_token=req.github_token
+        )
+        
+        return {
+            "user_id": user_id,
+            "username": user_data.get("login"),
+            "avatar_url": user_data.get("avatar_url"),
+            "github_token": req.github_token
+        }
+
+@app.get("/api/auth/me")
+async def get_me(authorization: str = Header(None)):
+    """Get current user info from token."""
+    if not authorization:
+        return JSONResponse(status_code=401, content={"detail": "No token provided"})
+    
+    token = authorization.replace("Bearer ", "").replace("token ", "")
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=10.0
+        )
+        
+        if resp.status_code != 200:
+            return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+        
+        user_data = resp.json()
+        return {
+            "username": user_data.get("login"),
+            "avatar_url": user_data.get("avatar_url"),
+            "email": user_data.get("email")
+        }
+
+@app.get("/api/auth/client-id")
+async def get_client_id():
+    """Return the GitHub OAuth client ID for frontend redirect."""
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        return JSONResponse(status_code=500, content={"detail": "OAuth not configured"})
+    return {"client_id": client_id}
+
+# ─── Run Agent ────────────────────────────────────────────────────
+
 @app.post("/api/run-agent")
-async def run_agent(req: RunRequest, bg: BackgroundTasks):
-    """Optimized run agent endpoint."""
+async def run_agent(req: RunRequest, bg: BackgroundTasks, authorization: str = Header(None)):
+    """Optimized run agent endpoint. Uses user's OAuth token or falls back to .env."""
     
     # Fast validation
     url_error = validate_github_url(req.github_url)
     if url_error:
         return JSONResponse(status_code=400, content={"detail": url_error})
     
-    # Use hardcoded GitHub token from .env
-    github_token = os.getenv("GITHUB_TOKEN")
+    # Get GitHub token: user's OAuth token first, then .env fallback
+    github_token = None
+    if authorization:
+        github_token = authorization.replace("Bearer ", "").replace("token ", "")
     if not github_token:
-        return JSONResponse(status_code=500, content={"detail": "GitHub token not configured"})
+        github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        return JSONResponse(status_code=401, content={"detail": "No GitHub token. Please login with GitHub first."})
     
     # Async repo check (non-blocking)
     repo_error = check_repo_exists(req.github_url, github_token)
@@ -259,15 +391,19 @@ def archive_job(job_id: str):
     if "total" not in job_data["score"]:
         job_data["score"]["total"] = job_data.get("errors_fixed", 0) * 10 + (20 if job_data.get("ci_status") == "PASSED" else 0)
     
-    # Persist to database
-    db = SessionLocal()
+    # Persist to database using save_run
     try:
-        crud.save_completed_run(db, job_data)
+        default_user_id = save_user(
+            github_id="default",
+            username="default_user",
+            email="",
+            avatar_url="",
+            github_token=""
+        )
+        save_run(job_id, default_user_id, job_data)
         print(f"[ARCHIVE] Job {job_id} saved to database")
     except Exception as e:
         print(f"[ARCHIVE] Error saving job {job_id} to DB: {e}")
-    finally:
-        db.close()
 
 def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
     """Run pipeline with error handling and database save."""
@@ -346,12 +482,11 @@ async def list_jobs():
 @app.get("/api/runs")
 async def list_runs():
     """Return completed runs from database."""
-    db = SessionLocal()
     try:
-        runs = crud.get_all_runs(db, limit=100)
-        return [r.to_dict() for r in runs]
-    finally:
-        db.close()
+        runs = get_user_runs(1, limit=100)
+        return runs
+    except Exception as e:
+        return []
 
 @app.get("/api/db/runs")
 async def list_db_runs():
@@ -379,8 +514,30 @@ async def get_db_run(job_id: str):
 @app.get("/api/stats")
 async def get_stats():
     """Dashboard stats computed from database."""
-    db = SessionLocal()
     try:
-        return crud.get_stats(db)
-    finally:
-        db.close()
+        import sqlite3
+        conn = sqlite3.connect("data/rift_agent.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM runs")
+        total_runs = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM runs WHERE ci_status='PASSED'")
+        passed = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COALESCE(SUM(errors_fixed), 0) FROM runs")
+        total_fixes = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COALESCE(AVG(elapsed_seconds), 0) FROM runs")
+        avg_time = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            "totalRuns": total_runs,
+            "successRate": round((passed / total_runs * 100) if total_runs > 0 else 0, 1),
+            "totalFixes": total_fixes,
+            "avgFixTime": round(avg_time, 1)
+        }
+    except Exception as e:
+        return {"totalRuns": 0, "successRate": 0, "totalFixes": 0, "avgFixTime": 0}
