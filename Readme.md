@@ -1,153 +1,259 @@
-#  RIFT Healing Agent - Autonomous DevOps AI
+# 🚀 RIFT Healing Agent - Autonomous DevOps AI
 
-An intelligent multi-agent system that automatically fixes code errors, runs tests, and ensures CI/CD pipeline success.
+An intelligent multi-agent system that automatically detects, fixes, and verifies code errors in CI/CD pipelines. Built for **RIFT 2026 Hackathon** — AI/ML · DevOps Automation · Agentic Systems Track.
 
-##  Features
+> **🌐 Live Demo**: [Coming Soon — Deploying to Render]  
+> **🎥 Video Demo**: [Coming Soon — LinkedIn Video]
 
-- **Autonomous Error Detection**: Automatically discovers and runs all test files
-- **Intelligent Fixing**: Uses GPT-4o to generate targeted fixes for failures
-- **CI/CD Integration**: Monitors pipeline and iterates until all tests pass
+---
+
+## 🎯 Features
+
+- **Autonomous Error Detection**: Discovers and runs all test files automatically
+- **Intelligent Fixing**: Uses GPT-4o / Groq to generate targeted fixes for failures
+- **CI/CD Integration**: Monitors pipeline and iterates until all tests pass (up to 5 retries)
 - **Multi-Language Support**: Python, JavaScript, TypeScript, Java, Go, Rust
-- **Production Dashboard**: Real-time React dashboard with comprehensive analytics
+- **GitHub OAuth Login**: Secure authentication — no manual token setup
+- **Production Dashboard**: Real-time React dashboard with score breakdown, fix tracking, and pipeline visualization
 
-##  Architecture
+---
 
-### Multi-Agent System (LangGraph)
-1. **Clone Agent** - Clones repository
-2. **Copybara Transform** - Normalizes code format
-3. **Test Agent** - Runs language-specific tests
-4. **Analyze Agent** - Parses errors and categorizes
-5. **Fix Agent** - Generates fixes using GPT-4o
-6. **Verify Agent** - Re-runs tests to confirm fixes
-7. **Push Agent** - Commits and pushes to new branch
+## 🏗️ Architecture
+
+### System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph Frontend["🖥️ React Frontend (Vite)"]
+        LP[Login Page<br/>GitHub OAuth]
+        DB[Dashboard<br/>Stats & History]
+        RP[Run Page<br/>Repo Input Form]
+        RS[Results Page<br/>Live Pipeline View]
+    end
+
+    subgraph Backend["⚙️ FastAPI Backend"]
+        API[REST API + SSE]
+        AUTH[OAuth Handler]
+        ORC[LangGraph Orchestrator]
+    end
+
+    subgraph Pipeline["🤖 Multi-Agent Pipeline"]
+        C[Clone Agent] --> T[Test Agent]
+        T --> A[Analyze Agent]
+        A --> F[Fix Agent<br/>GPT-4o / Groq]
+        F --> V[Verify Agent]
+        V -->|Tests Fail| A
+        V -->|Tests Pass| P[Push Agent]
+    end
+
+    subgraph Storage["💾 Storage"]
+        SQLite[(SQLite DB<br/>Users, Runs, Fixes)]
+        FS[File System<br/>Cloned Repos]
+    end
+
+    LP -->|OAuth Code| AUTH
+    AUTH -->|Token| API
+    RP -->|POST /api/run-agent| API
+    RS -->|SSE /api/stream| API
+    DB -->|GET /api/stats| API
+    API --> ORC
+    ORC --> Pipeline
+    Pipeline --> SQLite
+    Pipeline --> FS
+```
+
+### Multi-Agent Pipeline (LangGraph)
+
+| #   | Agent             | Responsibility                                         |
+| --- | ----------------- | ------------------------------------------------------ |
+| 1   | **Clone Agent**   | Clones GitHub repository, detects language             |
+| 2   | **Test Agent**    | Auto-discovers and runs test files                     |
+| 3   | **Analyze Agent** | Parses errors into structured bug reports              |
+| 4   | **Fix Agent**     | Generates targeted code fixes using LLM                |
+| 5   | **Verify Agent**  | Re-runs tests to confirm fixes                         |
+| 6   | **Push Agent**    | Commits with `[AI-AGENT]` prefix, pushes to new branch |
 
 ### Tech Stack
-- **Backend**: FastAPI + LangGraph + OpenAI GPT-4o
-- **Frontend**: React + Vite + Recharts
-- **Deployment**: Docker + Docker Compose
 
-##  Dashboard Features
+| Layer          | Technology                          |
+| -------------- | ----------------------------------- |
+| **Backend**    | FastAPI + LangGraph + OpenAI GPT-4o |
+| **Frontend**   | React 18 + Vite + Recharts          |
+| **Database**   | SQLite (users, runs, fixes)         |
+| **Auth**       | GitHub OAuth 2.0                    |
+| **Deployment** | Docker + Docker Compose             |
+
+---
+
+## 📊 Dashboard Features
 
 ### 1. Input Section
-- GitHub Repository URL
+
+- GitHub Repository URL text input
 - Team Name (e.g., "RIFT ORGANISERS")
 - Team Leader Name (e.g., "Saiyam Kumar")
-- Run Agent button with loading indicator
+- "Run Agent" button with loading indicator
 
 ### 2. Run Summary Card
+
 - Repository URL analyzed
-- Team name and leader
+- Team name and team leader name
 - Branch created: `TEAMNAME_LEADERNAME_AI_Fix`
-- Total failures detected and fixes applied
+- Total failures detected and total fixes applied
 - CI/CD status badge: **PASSED** (green) / **FAILED** (red)
-- Total time taken
+- Total time taken (start to finish)
 
 ### 3. Score Breakdown Panel
+
 - **Base Score**: 100 points
 - **Speed Bonus**: +10 if completed < 5 minutes
 - **Efficiency Penalty**: -2 per commit over 20
 - **Final Total Score** with visual progress bars
 
 ### 4. Fixes Applied Table
-Columns: File | Bug Type | Line Number | Commit Message | Status
 
-Bug Types:
-- `LINTING` (green)
-- `SYNTAX` (red)
-- `LOGIC` (purple)
-- `TYPE_ERROR` (orange)
-- `IMPORT` (cyan)
-- `INDENTATION` (yellow)
+Columns: **File** | **Bug Type** | **Line Number** | **Commit Message** | **Status**
+
+Bug Types (color-coded):
+
+- `LINTING` (green) · `SYNTAX` (red) · `LOGIC` (purple)
+- `TYPE_ERROR` (orange) · `IMPORT` (cyan) · `INDENTATION` (yellow)
 
 Status: ✓ Fixed (green) | ✗ Failed (red)
 
 ### 5. CI/CD Status Timeline
-- Visual timeline showing each iteration
-- Pass/fail badge for each run
-- Iteration count (e.g., "3/5")
-- Timestamps for each run
 
-##  Quick Start
+- Visual timeline showing each pipeline iteration
+- Pass/fail badge for each step
+- Iteration count with retry indicators
+- Timestamps for each event
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- OpenAI API Key
-- GitHub Personal Access Token
+
+- Python 3.10+
+- Node.js 18+
+- Docker & Docker Compose (optional)
+- OpenAI API Key (or Groq API Key — free)
+- GitHub OAuth App (for authentication)
 
 ### Setup
 
 1. **Clone Repository**
+
 ```bash
-git clone <your-repo-url>
-cd rift-healing-agent
+git clone https://github.com/Itx-Psycho0/autonomous-ci-cd-healing-agent.git
+cd autonomous-ci-cd-healing-agent
 ```
 
-2. **Configure Environment**
+2. **Backend Setup**
+
+```bash
+cd backend
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+3. **Frontend Setup**
+
+```bash
+cd frontend
+npm install
+```
+
+4. **Configure Environment**
+
 ```bash
 # backend/.env
 OPENAI_API_KEY=sk-proj-your-key-here
 GITHUB_TOKEN=ghp_your-token-here
+GITHUB_CLIENT_ID=your-oauth-client-id
+GITHUB_CLIENT_SECRET=your-oauth-client-secret
 ```
 
-3. **Start Services**
+5. **Start Services**
+
 ```bash
-docker-compose up -d
+# Terminal 1 — Backend
+cd backend
+python -m uvicorn main:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd frontend
+npm run dev
 ```
 
-4. **Access Dashboard**
-- Frontend: http://localhost:3000
+6. **Access Dashboard**
+
+- Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 
-##  Branch Naming Convention
+### Docker Deployment
+
+```bash
+docker-compose up -d
+# Frontend: http://localhost:3000
+# Backend: http://localhost:8000
+```
+
+---
+
+## 📝 Branch Naming Convention
 
 **Format**: `TEAMNAME_LEADERNAME_AI_Fix`
 
 Rules:
+
 - All UPPERCASE
-- Replace spaces with underscores (_)
+- Replace spaces with underscores (\_)
 - End with `_AI_Fix`
 - No special characters except underscores
 
 Examples:
+
 - Team: "RIFT ORGANISERS", Leader: "Saiyam Kumar" → `RIFT_ORGANISERS_SAIYAM_KUMAR_AI_Fix`
 - Team: "Code Warriors", Leader: "John Doe" → `CODE_WARRIORS_JOHN_DOE_AI_Fix`
 
-##  API Endpoints
+---
 
-### POST `/api/run-agent`
-Start a new healing agent run
+## 🔧 API Endpoints
 
-**Request:**
-```json
-{
-  "github_url": "https://github.com/user/repo",
-  "team_name": "RIFT ORGANISERS",
-  "leader_name": "Saiyam Kumar",
-  "branch_name": "RIFT_ORGANISERS_SAIYAM_KUMAR_AI_Fix"
-}
+| Method | Endpoint                | Description                      |
+| ------ | ----------------------- | -------------------------------- |
+| POST   | `/api/run-agent`        | Start a new healing agent run    |
+| GET    | `/api/stream/{job_id}`  | SSE stream for real-time updates |
+| GET    | `/api/results/{job_id}` | Get final results                |
+| GET    | `/api/health`           | Health check                     |
+| GET    | `/api/jobs`             | List active jobs                 |
+| POST   | `/api/auth/github`      | Exchange OAuth code for token    |
+| GET    | `/api/auth/client-id`   | Get OAuth Client ID              |
+| GET    | `/api/auth/me`          | Get authenticated user info      |
+| GET    | `/api/runs`             | List completed runs              |
+| GET    | `/api/stats`            | Dashboard statistics             |
+
+### Example: Start a Run
+
+```bash
+curl -X POST http://localhost:8000/api/run-agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ghp_your-token" \
+  -d '{
+    "github_url": "https://github.com/user/buggy-repo",
+    "team_name": "RIFT ORGANISERS",
+    "leader_name": "Saiyam Kumar"
+  }'
 ```
 
-**Response:**
-```json
-{
-  "job_id": "uuid-here",
-  "branch_name": "RIFT_ORGANISERS_SAIYAM_KUMAR_AI_Fix"
-}
-```
+---
 
-### GET `/api/stream/{job_id}`
-Server-Sent Events stream for real-time updates
+## 📊 Test Case Output Format
 
-### GET `/api/results/{job_id}`
-Get final results including `results.json`
-
-### GET `/api/health`
-Health check endpoint
-
-##  Test Case Format
-
-The agent outputs match this EXACT format:
+The agent outputs match this exact format:
 
 ```
 LINTING error in src/utils.py line 15 → Fix: remove the import statement
@@ -158,89 +264,118 @@ IMPORT error in src/db.py line 3 → Fix: fix missing import path
 INDENTATION error in src/config.py line 27 → Fix: fix indentation block
 ```
 
-##  Scoring System
+---
 
-- **Base Score**: 100 points
-- **Speed Bonus**: +10 points if completed in < 5 minutes
-- **Commit Penalty**: -2 points per commit over 20
-- **Maximum Score**: 110 points
+## 🎯 Scoring System
 
-##  Security
+| Component                           | Points  |
+| ----------------------------------- | ------- |
+| Base Score                          | 100     |
+| Speed Bonus (< 5 min)               | +10     |
+| Commit Penalty (per commit over 20) | -2 each |
+| **Maximum Score**                   | **110** |
+
+---
+
+## 🔒 Security
 
 - Sandboxed code execution with timeouts
 - No Docker-in-Docker (direct subprocess execution)
 - Environment variable isolation
-- GitHub token with minimal required scopes
+- GitHub OAuth tokens with minimal required scopes (`repo`)
+- Per-user token storage (no shared tokens)
 
-##  Project Structure
+---
+
+## 🐛 Supported Bug Types
+
+| Bug Type      | Description         | Example                               |
+| ------------- | ------------------- | ------------------------------------- |
+| `LINTING`     | Code quality issues | Unused imports, missing docstrings    |
+| `SYNTAX`      | Syntax errors       | Missing colons, unmatched brackets    |
+| `LOGIC`       | Logic bugs          | Wrong comparisons, off-by-one errors  |
+| `TYPE_ERROR`  | Type mismatches     | Wrong type annotations, invalid casts |
+| `IMPORT`      | Import issues       | Missing modules, wrong paths          |
+| `INDENTATION` | Whitespace errors   | Mixed tabs/spaces, wrong nesting      |
+
+---
+
+## 📦 Project Structure
 
 ```
-rift-healing-agent/
+autonomous-ci-cd-healing-agent/
 ├── backend/
 │   ├── agent/
-│   │   ├── nodes/          # Agent nodes
-│   │   ├── orchestrator.py # LangGraph workflow
-│   │   ├── parsers.py      # Error parsers
-│   │   └── state.py        # State management
-│   ├── main.py             # FastAPI app
+│   │   ├── nodes/              # Agent nodes (clone, test, analyze, fix, verify, push)
+│   │   ├── orchestrator.py     # LangGraph workflow orchestration
+│   │   ├── parsers.py          # Error parsers (9 language-specific parsers)
+│   │   └── state.py            # State management
+│   ├── main.py                 # FastAPI app + auth endpoints
+│   ├── database.py             # SQLite database (users, runs, fixes)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── pages/          # Dashboard, Run, Results
-│   │   ├── hooks/          # Custom hooks
-│   │   └── utils/          # Utilities
+│   │   ├── components/         # Navbar (with auth)
+│   │   ├── pages/              # LandingPage, Dashboard, RunPage, ResultsPage
+│   │   ├── hooks/              # useAgentStream (SSE hook)
+│   │   ├── utils/              # API service layer
+│   │   └── styles/             # CSS (global, landing)
 │   ├── package.json
 │   └── Dockerfile
 ├── docker-compose.yml
 └── README.md
 ```
 
-##  Testing
+---
 
-```bash
-# Test with a sample repository
-curl -X POST http://localhost:8000/api/run-agent \
-  -H "Content-Type: application/json" \
-  -d '{
-    "github_url": "https://github.com/user/buggy-repo",
-    "team_name": "RIFT ORGANISERS",
-    "leader_name": "Saiyam Kumar"
-  }'
-```
+## ⚠️ Known Limitations
 
-##  Deployment
+- **LLM API Credits Required**: The Fix Agent requires OpenAI API credits (or a free Groq API key) to generate code fixes. Without credits, the agent detects errors but cannot fix them.
+- **Single Repo at a Time**: The agent processes one repository per run. Concurrent runs on the same repo may conflict.
+- **Private Repos**: Requires a GitHub token with `repo` scope for accessing private repositories.
+- **Test Framework Detection**: Auto-detection works best with standard test frameworks (pytest, jest, JUnit, go test, cargo test). Custom test runners may not be detected.
+- **Large Repos**: Very large repositories (10,000+ files) may take longer to clone and analyze.
+- **Branch Conflicts**: If the target branch already exists, the push may fail. Delete the old branch first.
 
-### Frontend (Vercel/Netlify)
+---
+
+## 🚀 Deployment
+
+### Frontend (Vercel / Netlify)
+
 ```bash
 cd frontend
 npm run build
 # Deploy dist/ folder
 ```
 
-### Backend (Railway/Render)
+### Backend (Railway / Render)
+
 ```bash
-# Set environment variables
-OPENAI_API_KEY=your-key
-GITHUB_TOKEN=your-token
-
-# Deploy using Docker
+# Set environment variables:
+# OPENAI_API_KEY, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+# Deploy using Docker or direct Python
 ```
-
-##  License
-
-MIT License
-
-##  Team Name - Room no.518
-
-1. Harsh Saini (Leader)
-2. Anurag Singh
-3. Varun Yadav
-4. Aditya Chauhan
-
-Built for RIFT 2026 Hackathon
 
 ---
 
-**Status**: Production Ready |  Competition Compliant |  Fully Functional
+## 👥 Team
+
+Built for **RIFT 2026 Hackathon** — AI/ML · DevOps Automation · Agentic Systems Track
+
+| Member          | Role                                     |
+| --------------- | ---------------------------------------- |
+| **Team Leader** | Full-Stack Development & AI Agent Design |
+| **Member 2**    | Backend & Pipeline Architecture          |
+| **Member 3**    | Frontend Dashboard & UI/UX               |
+
+---
+
+## 📄 License
+
+MIT License
+
+---
+
+**Status**: ✅ Production Ready | 🎯 Competition Compliant | 🚀 Fully Functional
