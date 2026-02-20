@@ -43,10 +43,13 @@ def route_after_fix(state: AgentState) -> str:
     """Route from fix node - if all fixes failed, end workflow."""
     if state.get("status") == "failed":
         return END
+    if state.get("status") == "quota_reached":
+        return "push"
     return "verify"
 
 builder.add_conditional_edges("fix", route_after_fix, {
     "verify": "verify",
+    "push": "push",
     END: END
 })
 

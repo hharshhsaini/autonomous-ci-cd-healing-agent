@@ -131,6 +131,7 @@ def apply_fixes(state: AgentState) -> Dict:
         updated_fixes = state["fixes"].copy()
         errors_fixed = 0
         files_fixed = 0
+        quota_hit = False
         
         # Process each file
         for file_name, file_errors in files_map.items():
@@ -242,14 +243,25 @@ Return the COMPLETE corrected file. NO markdown, NO explanations, NO code blocks
             
             except Exception as e:
                 # Mark errors in this file as failed
+                error_str = str(e)
                 for fix in file_errors:
                     fix["status"] = "failed"
-                    fix["fix_description"] = f"Failed to fix: {str(e)[:200]}"
-                print(f"[FIX] ✗ Error fixing {file_name}: {str(e)}")
+                    fix["fix_description"] = f"Failed to fix: {error_str[:200]}"
+                print(f"[FIX] ✗ Error fixing {file_name}: {error_str}")
+                if "quota" in error_str.lower() or "billing" in error_str.lower():
+                    quota_hit = True
+        
+        total_fixed = sum(1 for f in updated_fixes if f.get("status") == "fixed")
         
         # Build result message
-        if errors_fixed > 0:
-            result_msg = f"Applied fixes to {files_fixed} files ({errors_fixed} errors) using {api_name} AI"
+        if quota_hit and total_fixed > 0:
+            result_msg = f"API Quota reached. Proceeding to push the {total_fixed} solved issues."
+            status = "quota_reached"
+            progress = 90
+            current_agent = "Git Push Agent"
+            error_message = ""
+        elif total_fixed > 0:
+            result_msg = f"Applied fixes to {files_fixed} files ({errors_fixed} errors) using {api_name} AI" if errors_fixed > 0 else f"No new fixes applied, but {total_fixed} previously fixed."
             status = "verifying"
             progress = 78
             current_agent = "Verify Agent"

@@ -47,6 +47,9 @@ function InputForm({ onSubmit, loading }) {
             style={styles.input}
             disabled={loading}
           />
+          <p style={{ color: '#8b949e', fontSize: '13px', marginTop: '6px', fontStyle: 'italic', marginBottom: 0 }}>
+            Note: Please provide a Forked repo URL for committing changes.
+          </p>
         </div>
 
         <div style={styles.row}>
