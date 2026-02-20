@@ -2,7 +2,7 @@
 
 An intelligent multi-agent system that automatically detects, fixes, and verifies code errors in CI/CD pipelines. Built for **RIFT 2026 Hackathon** — AI/ML · DevOps Automation · Agentic Systems Track.
 
-> **🌐 Live Demo**: [Coming Soon — Deploying to Render]  
+> ## **🌐 Live Demo**: https://frontend-1-23st.onrender.com  
 > **🎥 Video Demo**: [Coming Soon — LinkedIn Video]
 
 ---
