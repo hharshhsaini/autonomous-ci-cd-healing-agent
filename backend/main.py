@@ -22,7 +22,9 @@ import pathlib
 import time
 import subprocess
 import re
-import httpx
+import urllib.request
+import urllib.parse
+import urllib.error
 
 from database import init_db, save_user, get_user_by_github_id, save_run, get_user_runs
 
@@ -132,18 +134,17 @@ async def auth_github(req: GitHubAuthRequest):
         return JSONResponse(status_code=500, content={"detail": "GitHub OAuth not configured"})
     
     # Exchange code for token
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
+    try:
+        token_data_str = json.dumps({"client_id": client_id, "client_secret": client_secret, "code": req.code})
+        token_req = urllib.request.Request(
             "https://github.com/login/oauth/access_token",
-            json={"client_id": client_id, "client_secret": client_secret, "code": req.code},
-            headers={"Accept": "application/json"},
-            timeout=10.0
+            data=token_data_str.encode('utf-8'),
+            headers={"Accept": "application/json", "Content-Type": "application/json"}
         )
         
-        if token_resp.status_code != 200:
-            return JSONResponse(status_code=400, content={"detail": "Failed to exchange code"})
+        with urllib.request.urlopen(token_req, timeout=10) as token_resp:
+            token_data = json.loads(token_resp.read().decode('utf-8'))
         
-        token_data = token_resp.json()
         access_token = token_data.get("access_token")
         
         if not access_token:
@@ -151,16 +152,18 @@ async def auth_github(req: GitHubAuthRequest):
             return JSONResponse(status_code=400, content={"detail": error})
         
         # Fetch user profile
-        user_resp = await client.get(
+        user_req = urllib.request.Request(
             "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
-            timeout=10.0
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
         )
         
-        if user_resp.status_code != 200:
-            return JSONResponse(status_code=400, content={"detail": "Failed to fetch GitHub user"})
-        
-        user_data = user_resp.json()
+        with urllib.request.urlopen(user_req, timeout=10) as user_resp:
+            user_data = json.loads(user_resp.read().decode('utf-8'))
+    
+    except urllib.error.HTTPError as e:
+        return JSONResponse(status_code=400, content={"detail": f"GitHub API error: {e.code}"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"OAuth failed: {str(e)}"})
     
     # Save user to database
     user_id = save_user(
@@ -183,17 +186,14 @@ async def auth_github(req: GitHubAuthRequest):
 @app.post("/api/auth/verify-token")
 async def verify_token(req: TokenVerifyRequest):
     """Verify a GitHub token is valid."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
+    try:
+        user_req = urllib.request.Request(
             "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {req.github_token}", "Accept": "application/json"},
-            timeout=10.0
+            headers={"Authorization": f"Bearer {req.github_token}", "Accept": "application/json"}
         )
         
-        if resp.status_code != 200:
-            return JSONResponse(status_code=401, content={"detail": "Invalid GitHub token"})
-        
-        user_data = resp.json()
+        with urllib.request.urlopen(user_req, timeout=10) as resp:
+            user_data = json.loads(resp.read().decode('utf-8'))
         
         # Save/update user in DB
         user_id = save_user(
@@ -210,6 +210,8 @@ async def verify_token(req: TokenVerifyRequest):
             "avatar_url": user_data.get("avatar_url"),
             "github_token": req.github_token
         }
+    except urllib.error.HTTPError:
+        return JSONResponse(status_code=401, content={"detail": "Invalid GitHub token"})
 
 @app.get("/api/auth/me")
 async def get_me(authorization: str = Header(None)):
@@ -219,22 +221,22 @@ async def get_me(authorization: str = Header(None)):
     
     token = authorization.replace("Bearer ", "").replace("token ", "")
     
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
+    try:
+        user_req = urllib.request.Request(
             "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            timeout=10.0
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}
         )
         
-        if resp.status_code != 200:
-            return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+        with urllib.request.urlopen(user_req, timeout=10) as resp:
+            user_data = json.loads(resp.read().decode('utf-8'))
         
-        user_data = resp.json()
         return {
             "username": user_data.get("login"),
             "avatar_url": user_data.get("avatar_url"),
             "email": user_data.get("email")
         }
+    except urllib.error.HTTPError:
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"})
 
 @app.get("/api/auth/client-id")
 async def get_client_id():
@@ -465,12 +467,9 @@ async def health():
 async def test_github():
     """Test GitHub API connectivity."""
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://api.github.com/zen",
-                timeout=5.0
-            )
-            return {"status": "ok", "github_reachable": response.status_code == 200, "message": response.text}
+        req = urllib.request.Request("https://api.github.com/zen")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return {"status": "ok", "github_reachable": True, "message": response.read().decode('utf-8')}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
