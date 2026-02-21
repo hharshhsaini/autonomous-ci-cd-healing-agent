@@ -559,16 +559,16 @@ async def get_stats(authorization: str = Header(None)):
         try:
             cursor = conn.cursor()
             
-            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=?", (user_id,))
             total_runs = cursor.fetchone()[0] or 0
             
-            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND status IN ('done', 'failed') AND ci_status='PASSED'", (user_id,))
+            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND ci_status='PASSED'", (user_id,))
             passed = cursor.fetchone()[0] or 0
             
-            cursor.execute("SELECT COALESCE(SUM(errors_fixed), 0) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            cursor.execute("SELECT COALESCE(SUM(errors_fixed), 0) FROM runs WHERE user_id=?", (user_id,))
             total_fixes = cursor.fetchone()[0] or 0
             
-            cursor.execute("SELECT COALESCE(AVG(elapsed_seconds), 0) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            cursor.execute("SELECT COALESCE(AVG(elapsed_seconds), 0) FROM runs WHERE user_id=?", (user_id,))
             avg_time = cursor.fetchone()[0] or 0
 
             # Bug types aggregation
@@ -576,7 +576,7 @@ async def get_stats(authorization: str = Header(None)):
                 SELECT f.type, COUNT(f.id) 
                 FROM fixes f 
                 JOIN runs r ON f.run_id = r.id 
-                WHERE r.user_id=? AND r.status IN ('done', 'failed') 
+                WHERE r.user_id=? 
                 GROUP BY f.type
             ''', (user_id,))
             by_bug_type = {row[0] or "UNKNOWN": row[1] for row in cursor.fetchall()}
@@ -592,10 +592,10 @@ async def get_stats(authorization: str = Header(None)):
 
             # Monthly Success rates
             cursor.execute('''
-                SELECT substr(timestamp, 1, 7) as month, COUNT(id), SUM(CASE WHEN ci_status = 'PASSED' THEN 1 ELSE 0 END)
+                SELECT substr(created_at, 1, 7) as month, COUNT(id), SUM(CASE WHEN ci_status = 'PASSED' THEN 1 ELSE 0 END)
                 FROM runs
-                WHERE user_id=? AND status IN ('done', 'failed') AND substr(timestamp, 1, 7) IN (?, ?)
-                GROUP BY substr(timestamp, 1, 7)
+                WHERE user_id=? AND substr(created_at, 1, 7) IN (?, ?)
+                GROUP BY substr(created_at, 1, 7)
             ''', (user_id, this_month_prefix, last_month_prefix))
             
             this_month_rate = 0
@@ -614,16 +614,15 @@ async def get_stats(authorization: str = Header(None)):
             fallback_epoch_ts = time.time() - 7 * 86400
 
             cursor.execute('''
-                SELECT timestamp, errors_fixed FROM runs 
-                WHERE user_id=? AND status IN ('done', 'failed') 
-                AND (start_time >= ? OR start_time IS NULL)
-            ''', (user_id, fallback_epoch_ts))
+                SELECT created_at, errors_fixed FROM runs 
+                WHERE user_id=? AND created_at >= date('now', '-7 days')
+            ''', (user_id,))
 
             for row in cursor.fetchall():
                 ts, r_fixes = row
                 try:
                     if ts:
-                        dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+                        dt = datetime.strptime(ts[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
                         if (now - dt).days <= 7:
                             dn = day_names[dt.weekday()]
                             if dn in by_day:

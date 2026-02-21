@@ -199,15 +199,21 @@ def get_user_runs(user_id: int, limit: int = 10) -> List[Dict]:
         runs.append({
             "id": row[0],
             "job_id": row[1],
-            "repo_url": row[3],
+            "repo": row[3], # Remap repo_url to repo for frontend Display
             "repo_language": row[4],
+            "team_name": row[5],
+            "leader_name": row[6],
             "branch_name": row[7],
             "errors_found": row[8],
             "errors_fixed": row[9],
             "ci_status": row[12],
-            "score_total": row[14],
-            "created_at": row[16]
+            "score": {
+                "total": row[14],
+                "elapsed_seconds": row[15]
+            },
+            "timestamp": (row[16][:19].replace(" ", "T") + "Z") if row[16] else None
         })
+
     
     return runs
 
