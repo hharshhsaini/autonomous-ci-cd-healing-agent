@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { getRunResults } from "../utils/api";
 import { getRunResults, submitReview } from "../utils/api";
 import { useAgentStream } from "../hooks/useAgentStream";
 import { formatTime } from "../utils/formatters";
