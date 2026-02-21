@@ -1,10 +1,18 @@
 import React from 'react';
 
 function FixesTable({ fixes, filter, onFilterChange }) {
+  const [visibleItems, setVisibleItems] = React.useState(50);
+
+  // Reset pagination when filter changes
+  React.useEffect(() => {
+    setVisibleItems(50);
+  }, [filter]);
+
   if (!fixes) return null;
 
   const types = ['ALL', 'LINTING', 'SYNTAX', 'LOGIC', 'TYPE_ERROR', 'IMPORT', 'INDENTATION'];
   const filtered = filter === 'ALL' ? fixes : fixes.filter(f => f.type === filter);
+  const visibleFixes = filtered.slice(0, visibleItems);
 
   const typeColors = {
     LINTING: '#58a6ff',
@@ -24,7 +32,7 @@ function FixesTable({ fixes, filter, onFilterChange }) {
     <div style={styles.container}>
       <div style={styles.header}>
         <h3 style={styles.title}>Fixes Applied</h3>
-        <span style={styles.count}>Showing {filtered.length} of {fixes.length} fixes</span>
+        <span style={styles.count}>Showing {visibleFixes.length} of {filtered.length} fixes</span>
       </div>
 
       <div style={styles.filters}>
@@ -54,7 +62,7 @@ function FixesTable({ fixes, filter, onFilterChange }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((fix, idx) => (
+            {visibleFixes.map((fix, idx) => (
               <tr key={fix.id} style={{
                 ...styles.row,
                 background: idx % 2 === 0 ? '#0d1117' : '#161b22'
@@ -94,6 +102,14 @@ function FixesTable({ fixes, filter, onFilterChange }) {
           </tbody>
         </table>
       </div>
+      {filtered.length > visibleItems && (
+        <button
+          style={{ ...styles.filterButton, marginTop: '16px', width: '100%', padding: '10px' }}
+          onClick={() => setVisibleItems(prev => prev + 50)}
+        >
+          Load More ({filtered.length - visibleItems} remaining)
+        </button>
+      )}
     </div>
   );
 }

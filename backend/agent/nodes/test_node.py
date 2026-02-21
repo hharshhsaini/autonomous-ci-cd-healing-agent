@@ -4,8 +4,9 @@ from datetime import datetime
 from typing import Dict
 from ..state import AgentState
 
-def detect_language(repo_path: str) -> str:
-    """Detect primary language - supports Python, JS, TS, Go only."""
+def gather_repo_info(repo_path: str) -> tuple[str, list[str]]:
+    """Single-pass O(N) directory traversal to detect language exactly once
+    and cache relevant files (e.g. JS/TS files for syntax checking) to avoid O(N^2) I/O sweeps."""
     counts = {"python": 0, "javascript": 0, "typescript": 0, "go": 0}
     ext_map = {
         ".py": "python",
@@ -15,21 +16,25 @@ def detect_language(repo_path: str) -> str:
     }
     skip_dirs = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build', '.next'}
     
+    js_files = []
+    
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for f in files:
             ext = os.path.splitext(f)[1].lower()
             if ext in ext_map:
                 counts[ext_map[ext]] += 1
+                if ext in ('.js', '.jsx'):
+                    js_files.append(os.path.join(root, f))
     
-    return max(counts, key=counts.get) if any(counts.values()) else "python"
+    detected_lang = max(counts, key=counts.get) if any(counts.values()) else "python"
+    return detected_lang, js_files
 
 def run_tests(state: AgentState) -> Dict:
     """Run tests - supports Python, JavaScript, TypeScript, React, Go."""
-    lang = detect_language(state["repo_path"])
     repo_path = state["repo_path"]
+    lang, js_files_cache = gather_repo_info(repo_path)
     output = ""
-    skip_dirs = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build', '.next'}
     
     print(f"[TEST] Detected language: {lang}")
     print(f"[TEST] Running tests in: {repo_path}")
@@ -100,18 +105,11 @@ def run_tests(state: AgentState) -> Dict:
                 output += f"pytest not available or failed: {str(e)}\n"
         
         elif lang in ("javascript", "typescript"):
-            # Run Node.js syntax check
+            # Run Node.js syntax check on cached JS files
             output += "=NODE_SYNTAX=\n"
             try:
-                js_files = []
-                for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if d not in skip_dirs]
-                    for f in files:
-                        if f.endswith(('.js', '.jsx')):
-                            js_files.append(os.path.join(root, f))
-                
                 syntax_errors = 0
-                for file_path in js_files[:50]:  # Check max 50 files
+                for file_path in js_files_cache[:50]:  # Check max 50 files
                     result = subprocess.run(
                         ["node", "--check", file_path],
                         capture_output=True,

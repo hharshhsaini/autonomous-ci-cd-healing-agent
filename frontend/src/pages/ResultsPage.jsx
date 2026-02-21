@@ -50,6 +50,7 @@ export default function ResultsPage({ runId, setScreen }) {
   const [elapsed, setElapsed] = useState(0);
 
   const { data: streamData, isComplete } = useAgentStream(runId);
+  const [visibleItems, setVisibleItems] = useState(50);
 
   useEffect(() => {
     if (!runId) {
@@ -574,7 +575,7 @@ export default function ResultsPage({ runId, setScreen }) {
             {run.fixes.length} fixed)
           </h3>
           <div style={s.testCaseList}>
-            {run.fixes.map((fix, i) => (
+            {run.fixes.slice(0, visibleItems).map((fix, i) => (
               <div
                 key={i}
                 style={{
@@ -710,6 +711,14 @@ export default function ResultsPage({ runId, setScreen }) {
               </div>
             ))}
           </div>
+          {run.fixes.length > visibleItems && (
+            <button
+              style={{ ...s.backBtn, marginTop: '16px', width: '100%' }}
+              onClick={() => setVisibleItems(prev => prev + 50)}
+            >
+              Load More Fixes ({run.fixes.length - visibleItems} remaining)
+            </button>
+          )}
         </div>
       )}
 

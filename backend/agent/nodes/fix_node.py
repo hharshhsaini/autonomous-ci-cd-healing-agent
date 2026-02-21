@@ -113,16 +113,14 @@ def apply_fixes(state: AgentState) -> Dict:
         lang = state.get("repo_language", "python")
         system_prompt = SYSTEM_PROMPTS.get(lang, SYSTEM_PROMPTS["python"])
         
-        # Skip test files
-        SKIP_PATTERNS = ['.test.js', '.spec.js', '.test.ts', '.spec.ts', 
-                         '.test.jsx', '.spec.jsx', '_test.go', '_test.py',
-                         'test_', '.test.', '.spec.', '/test/', '/tests/']
+        # Skip test files using compiled regex for O(1) matching per file
+        SKIP_REGEX = re.compile(r'(\.test\.|\.spec\.|_test\.go|_test\.py|test_|/test/|/tests/)', re.IGNORECASE)
         
         # Group fixes by file
         files_map = defaultdict(list)
         for fix in state["fixes"]:
             if fix["status"] == "pending":
-                if any(pattern in fix["file"].lower() for pattern in SKIP_PATTERNS):
+                if SKIP_REGEX.search(fix["file"]):
                     fix["status"] = "skipped"
                     fix["fix_description"] = "Test file - skipped"
                 else:
