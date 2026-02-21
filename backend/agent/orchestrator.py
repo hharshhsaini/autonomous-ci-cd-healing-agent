@@ -112,7 +112,7 @@ class HealingOrchestrator:
         
         try:
             # Stream through the graph and update job state
-            for step_output in compiled_graph.stream(initial_state):
+            for step_output in compiled_graph.stream(initial_state, config={"recursion_limit": 100}):
                 node_name = list(step_output.keys())[0]
                 updated = step_output[node_name]
                 

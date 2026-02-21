@@ -23,21 +23,43 @@ const PIPELINE_STEPS = [
   { key: "pushing", label: "Push", icon: "upload", agent: "Git Push Agent" },
 ];
 
-function getStepState(stepKey, currentStatus) {
+function getStepState(stepKey, run) {
+  const currentStatus = run.status;
   const statusOrder = [
     "cloning",
     "testing",
     "analyzing",
     "fixing",
     "verifying",
-    "pushing",
-    "done",
-    "failed",
+    "pushing"
   ];
-  const currentIdx = statusOrder.indexOf(currentStatus);
+
+  const agentToStatus = {
+    "Clone Agent": "cloning",
+    "Test Agent": "testing",
+    "Analyze Agent": "analyzing",
+    "Fix Agent": "fixing",
+    "Verify Agent": "verifying",
+    "Git Push Agent": "pushing"
+  };
+
+  if (currentStatus === "done") return "done";
+
+  // If failed, use current_agent to determine where it stopped
+  let evalStatus = currentStatus;
+  if (currentStatus === "failed") {
+    evalStatus = agentToStatus[run.current_agent] || "cloning";
+  }
+
+  const currentIdx = statusOrder.indexOf(evalStatus);
   const stepIdx = statusOrder.indexOf(stepKey);
 
-  if (currentStatus === "done" || currentStatus === "failed") return "done";
+  if (currentStatus === "failed") {
+    if (stepIdx < currentIdx) return "done";
+    if (stepIdx === currentIdx) return "failed"; // custom state for the failed node
+    return "pending";
+  }
+
   if (stepIdx < currentIdx) return "done";
   if (stepIdx === currentIdx) return "active";
   return "pending";
@@ -289,9 +311,10 @@ export default function ResultsPage({ runId, setScreen }) {
 
         <div style={s.stepsRow}>
           {PIPELINE_STEPS.map((step, i) => {
-            const state = getStepState(step.key, run.status);
+            const state = getStepState(step.key, run);
             const isActive = state === "active";
             const isDone = state === "done";
+            const isFailedNode = state === "failed";
             const isLast = i === PIPELINE_STEPS.length - 1;
 
             return (
@@ -308,14 +331,18 @@ export default function ResultsPage({ runId, setScreen }) {
                       ...s.stepCircle,
                       background: isDone
                         ? "var(--green)"
-                        : isActive
-                          ? "rgba(0,255,136,0.15)"
-                          : "var(--card2)",
+                        : isFailedNode
+                          ? "var(--red)"
+                          : isActive
+                            ? "rgba(0,255,136,0.15)"
+                            : "var(--card2)",
                       border: isActive
                         ? "2px solid var(--green)"
                         : isDone
                           ? "2px solid var(--green)"
-                          : "2px solid var(--border)",
+                          : isFailedNode
+                            ? "2px solid var(--red)"
+                            : "2px solid var(--border)",
                       ...(isActive
                         ? { animation: "rift-glow 1.5s ease-in-out infinite" }
                         : {}),
@@ -331,6 +358,17 @@ export default function ResultsPage({ runId, setScreen }) {
                         }}
                       >
                         check
+                      </span>
+                    ) : isFailedNode ? (
+                      <span
+                        className="material-icons"
+                        style={{
+                          color: "#0d1117",
+                          fontSize: 16,
+                          fontWeight: 700,
+                        }}
+                      >
+                        close
                       </span>
                     ) : isActive ? (
                       <span
@@ -357,10 +395,12 @@ export default function ResultsPage({ runId, setScreen }) {
                       ...s.stepLabel,
                       color: isDone
                         ? "var(--green)"
-                        : isActive
-                          ? "var(--text)"
-                          : "var(--text-dim)",
-                      fontWeight: isActive ? 600 : 400,
+                        : isFailedNode
+                          ? "var(--red)"
+                          : isActive
+                            ? "var(--text)"
+                            : "var(--text-dim)",
+                      fontWeight: isActive || isFailedNode ? 600 : 400,
                     }}
                   >
                     {step.label}
