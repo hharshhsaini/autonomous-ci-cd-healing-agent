@@ -5,7 +5,6 @@ from .nodes.test_node import run_tests
 from .nodes.analyze_node import analyze_errors
 from .nodes.fix_node import apply_fixes
 from .nodes.verify_node import verify_fixes
-from .nodes.push_node import push_to_branch
 import time
 
 # Build the graph
@@ -17,7 +16,6 @@ builder.add_node("test", run_tests)
 builder.add_node("analyze", analyze_errors)
 builder.add_node("fix", apply_fixes)
 builder.add_node("verify", verify_fixes)
-builder.add_node("push", push_to_branch)
 
 # Set entry point
 builder.set_entry_point("clone")
