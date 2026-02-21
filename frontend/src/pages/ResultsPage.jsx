@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { getRunResults } from "../utils/api";
 import { useAgentStream } from "../hooks/useAgentStream";
 import { formatTime } from "../utils/formatters";
+import DiffViewer from "../components/DiffViewer";
 
 // Pipeline steps in order
 const PIPELINE_STEPS = [
@@ -748,6 +749,11 @@ export default function ResultsPage({ runId, setScreen }) {
                     <span style={s.lineLabel}>Line {fix.line}</span>
                   )}
                 </div>
+                {fix.diff && fix.status === "fixed" && (
+                  <div style={{ marginTop: '12px' }}>
+                    <DiffViewer diff={fix.diff} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

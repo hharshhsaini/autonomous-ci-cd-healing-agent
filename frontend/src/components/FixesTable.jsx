@@ -1,4 +1,5 @@
 import React from 'react';
+import DiffViewer from './DiffViewer';
 
 function FixesTable({ fixes, filter, onFilterChange }) {
   const [visibleItems, setVisibleItems] = React.useState(50);
@@ -63,41 +64,51 @@ function FixesTable({ fixes, filter, onFilterChange }) {
           </thead>
           <tbody>
             {visibleFixes.map((fix, idx) => (
-              <tr key={fix.id} style={{
-                ...styles.row,
-                background: idx % 2 === 0 ? '#0d1117' : '#161b22'
-              }}>
-                <td style={styles.td}>
-                  <code style={styles.file}>{truncatePath(fix.file)}</code>
-                </td>
-                <td style={styles.td}>
-                  <span style={{
-                    ...styles.badge,
-                    background: typeColors[fix.type] || '#6e7681'
-                  }}>
-                    {fix.type}
-                  </span>
-                </td>
-                <td style={styles.td}>
-                  <code style={styles.line}>{fix.line}</code>
-                </td>
-                <td style={styles.td}>
-                  <code style={styles.commit}>{fix.commit_message}</code>
-                </td>
-                <td style={styles.td}>
-                  {fix.status === 'fixed' ? (
-                    <span style={{ ...styles.status, color: '#3fb950' }}>
-                      <span className="material-icons" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>check_circle</span>
-                      Fixed
+              <React.Fragment key={fix.id}>
+                <tr style={{
+                  ...styles.row,
+                  background: idx % 2 === 0 ? '#0d1117' : '#161b22',
+                  borderBottom: fix.diff && fix.status === "fixed" ? 'none' : '1px solid #21262d'
+                }}>
+                  <td style={styles.td}>
+                    <code style={styles.file}>{truncatePath(fix.file)}</code>
+                  </td>
+                  <td style={styles.td}>
+                    <span style={{
+                      ...styles.badge,
+                      background: typeColors[fix.type] || '#6e7681'
+                    }}>
+                      {fix.type}
                     </span>
-                  ) : (
-                    <span style={{ ...styles.status, color: '#f85149' }}>
-                      <span className="material-icons" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>cancel</span>
-                      Failed
-                    </span>
-                  )}
-                </td>
-              </tr>
+                  </td>
+                  <td style={styles.td}>
+                    <code style={styles.line}>{fix.line}</code>
+                  </td>
+                  <td style={styles.td}>
+                    <code style={styles.commit}>{fix.commit_message}</code>
+                  </td>
+                  <td style={styles.td}>
+                    {fix.status === 'fixed' ? (
+                      <span style={{ ...styles.status, color: '#3fb950' }}>
+                        <span className="material-icons" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>check_circle</span>
+                        Fixed
+                      </span>
+                    ) : (
+                      <span style={{ ...styles.status, color: '#f85149' }}>
+                        <span className="material-icons" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>cancel</span>
+                        Failed
+                      </span>
+                    )}
+                  </td>
+                </tr>
+                {fix.diff && fix.status === "fixed" && (
+                  <tr key={`${fix.id}-diff`} style={{ background: idx % 2 === 0 ? '#0d1117' : '#161b22' }}>
+                    <td colSpan="5" style={{ padding: '0 12px 16px 12px', borderBottom: '1px solid #21262d' }}>
+                      <DiffViewer diff={fix.diff} />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

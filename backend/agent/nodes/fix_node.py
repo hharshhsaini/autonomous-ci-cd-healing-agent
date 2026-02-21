@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+import difflib
 from datetime import datetime
 from collections import defaultdict
 from typing import Dict, Tuple, Optional
@@ -215,17 +216,27 @@ Return the COMPLETE corrected file. NO markdown, NO explanations, NO code blocks
                     if fixed_code and not fixed_code.endswith('\n'):
                         fixed_code += '\n'
                     
+                    # Compute unified diff
+                    original_lines = file_content.splitlines(keepends=True)
+                    fixed_lines = fixed_code.splitlines(keepends=True)
+                    diff_generator = difflib.unified_diff(
+                        original_lines, fixed_lines, 
+                        fromfile=f"a/{file_name}", tofile=f"b/{file_name}", lineterm=''
+                    )
+                    diff_text = '\n'.join(list(diff_generator))
+                    
                     # Write back the fixed code
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(fixed_code)
                     
                     print(f"[FIX] ✓ Successfully fixed {len(file_errors)} errors in {file_name}")
                     
-                    # Mark each error as fixed
+                    # Mark each error as fixed and attach diff
                     for fix in file_errors:
                         fix["status"] = "fixed"
                         fix["fix_description"] = f"{api_name} AI corrected {fix['type']} issue"
                         fix["formatted"] = f"{fix['type']} error in {fix['file']} line {fix['line']} → Fix: {fix['fix_description']}"
+                        fix["diff"] = diff_text
                         errors_fixed += 1
                     
                     files_fixed += 1

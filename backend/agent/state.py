@@ -8,6 +8,7 @@ class FixItem(TypedDict):
     message: str
     formatted: str  # "LINTING error in src/utils.py line 15 → Fix: remove the import statement"
     fix_description: str
+    diff: str  # unified diff patch
     commit_message: str  # "[AI-AGENT] Fix LINTING in src/utils.py line 15"
     status: str  # pending|fixed|failed
 
