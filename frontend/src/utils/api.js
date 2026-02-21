@@ -111,7 +111,9 @@ export async function getRunResults(jobId) {
  * Get all completed runs — GET /api/runs
  */
 export async function getRuns() {
-  const res = await fetch(`${getApiUrl()}/api/runs`);
+  const res = await fetch(`${getApiUrl()}/api/runs`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error(`Runs fetch failed: ${res.status}`);
   return res.json();
 }
@@ -120,7 +122,9 @@ export async function getRuns() {
  * Get dashboard stats — GET /api/stats
  */
 export async function getStats() {
-  const res = await fetch(`${getApiUrl()}/api/stats`);
+  const res = await fetch(`${getApiUrl()}/api/stats`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
   return res.json();
 }

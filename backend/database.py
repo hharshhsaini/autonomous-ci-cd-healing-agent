@@ -61,11 +61,18 @@ def init_db():
             line INTEGER,
             message TEXT,
             fix_description TEXT,
+            diff TEXT,
             status TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (run_id) REFERENCES runs(id)
         )
     """)
+    
+    # Try to add diff column if missing (for existing databases)
+    try:
+        cursor.execute("ALTER TABLE fixes ADD COLUMN diff TEXT;")
+    except sqlite3.OperationalError:
+        pass # Column already exists
     
     conn.commit()
     conn.close()
@@ -116,6 +123,27 @@ def get_user_by_github_id(github_id: str) -> Optional[Dict]:
         }
     return None
 
+def get_user_by_token(token: str) -> Optional[Dict]:
+    """Get user by GitHub token."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM users WHERE github_token=?", (token,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "id": row[0],
+            "github_id": row[1],
+            "username": row[2],
+            "email": row[3],
+            "avatar_url": row[4],
+            "github_token": row[5],
+            "created_at": row[6]
+        }
+    return None
+
 def save_run(job_id: str, user_id: int, results: Dict) -> int:
     """Save run results."""
     conn = sqlite3.connect(DB_PATH)
@@ -142,12 +170,12 @@ def save_run(job_id: str, user_id: int, results: Dict) -> int:
     # Save fixes
     for fix in results.get("fixes", []):
         cursor.execute("""
-            INSERT INTO fixes (run_id, fix_id, type, file, line, message, fix_description, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fixes (run_id, fix_id, type, file, line, message, fix_description, diff, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id, fix.get("id"), fix.get("type"), fix.get("file"),
             fix.get("line"), fix.get("message"), fix.get("fix_description"),
-            fix.get("status")
+            fix.get("diff", ""), fix.get("status")
         ))
     
     conn.commit()
@@ -208,6 +236,7 @@ def get_run_details(job_id: str) -> Optional[Dict]:
             "line": row[5],
             "message": row[6],
             "fix_description": row[7],
+            "diff": getattr(row, '9', '') if len(row) > 9 and row[9] is not None else (row[8] if len(row)>9 and "diff TEXT" in "" else (row[9] if len(row) > 9 else "")),
             "status": row[8]
         })
     

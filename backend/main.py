@@ -276,12 +276,18 @@ async def run_agent(req: RunRequest, bg: BackgroundTasks, authorization: str = H
     leader_clean = clean_name(req.leader_name)
     branch = f"{team_clean}_{leader_clean}_AI_Fix"
     
+    # Get user_id from token for DB association
+    from database import get_user_by_token
+    user_data = get_user_by_token(github_token)
+    user_id = user_data["id"] if user_data else 1 # Default to 1 if from .env
+    
     # Fast job creation
     job_id = str(uuid.uuid4())
     current_time = time.time()
     
     jobs[job_id] = {
         "job_id": job_id,
+        "user_id": user_id,
         "status": "queued",
         "progress": 0,
         "branch_name": branch,
@@ -395,15 +401,10 @@ def archive_job(job_id: str):
     
     # Persist to database using save_run
     try:
-        default_user_id = save_user(
-            github_id="default",
-            username="default_user",
-            email="",
-            avatar_url="",
-            github_token=""
-        )
-        save_run(job_id, default_user_id, job_data)
-        print(f"[ARCHIVE] Job {job_id} saved to database")
+        from database import save_run
+        user_id = job_data.get("user_id", 1)
+        save_run(job_id, user_id, job_data)
+        print(f"[ARCHIVE] Job {job_id} saved to database with user_id {user_id}")
     except Exception as e:
         print(f"[ARCHIVE] Error saving job {job_id} to DB: {e}")
 
@@ -425,27 +426,8 @@ def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
             leader_name=req.leader_name
         )
         
-        # Save to database (with default user_id = 1)
-        try:
-            if job_id in jobs:
-                # Ensure default user exists
-                from database import save_user, save_run
-                
-                # Create/get default user
-                default_user_id = save_user(
-                    github_id="default",
-                    username="default_user",
-                    email="",
-                    avatar_url="",
-                    github_token=github_token
-                )
-                
-                # Save run to database
-                save_run(job_id, default_user_id, jobs[job_id])
-                print(f"[DB] Saved run {job_id} to database")
-        except Exception as db_error:
-            print(f"[DB] Failed to save to database: {db_error}")
-            # Don't fail the whole pipeline if DB save fails
+        # Save to database (we skip manual step and rely wholly on archive_job in finally block to prevent duplicate overwriting)
+        pass
             
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -488,12 +470,17 @@ async def list_runs():
         return []
 
 @app.get("/api/db/runs")
-async def list_db_runs():
+async def list_db_runs(authorization: str = Header(None)):
     """Get runs from database."""
+    from database import get_user_runs, get_user_by_token
+    user_id = 1
+    if authorization:
+        token = authorization.replace("Bearer ", "").replace("token ", "")
+        u = get_user_by_token(token)
+        if u:
+            user_id = u["id"]
     try:
-        from database import get_user_runs
-        # Get runs for default user (user_id = 1)
-        runs = get_user_runs(1, limit=50)
+        runs = get_user_runs(user_id, limit=50)
         return runs
     except Exception as e:
         return {"error": str(e), "runs": []}
@@ -511,99 +498,108 @@ async def get_db_run(job_id: str):
         return {"error": str(e)}
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(authorization: str = Header(None)):
     """Dashboard stats computed using direct O(1) SQLite aggregations."""
     try:
+        from database import get_user_by_token
+        user_id = 1
+        if authorization:
+            token = authorization.replace("Bearer ", "").replace("token ", "")
+            u = get_user_by_token(token)
+            if u:
+                user_id = u["id"]
+
         import sqlite3
         from datetime import datetime
         conn = sqlite3.connect("data/rift_agent.db")
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM runs WHERE status IN ('done', 'failed')")
-        total_runs = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM runs WHERE status IN ('done', 'failed') AND ci_status='PASSED'")
-        passed = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COALESCE(SUM(errors_fixed), 0) FROM runs WHERE status IN ('done', 'failed')")
-        total_fixes = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COALESCE(AVG(elapsed_seconds), 0) FROM runs WHERE status IN ('done', 'failed')")
-        avg_time = cursor.fetchone()[0] or 0
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            total_runs = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND status IN ('done', 'failed') AND ci_status='PASSED'", (user_id,))
+            passed = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT COALESCE(SUM(errors_fixed), 0) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            total_fixes = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT COALESCE(AVG(elapsed_seconds), 0) FROM runs WHERE user_id=? AND status IN ('done', 'failed')", (user_id,))
+            avg_time = cursor.fetchone()[0] or 0
 
-        # Bug types aggregation
-        cursor.execute('''
-            SELECT f.type, COUNT(f.id) 
-            FROM fixes f 
-            JOIN runs r ON f.run_id = r.id 
-            WHERE r.status IN ('done', 'failed') 
-            GROUP BY f.type
-        ''')
-        by_bug_type = {row[0] or "UNKNOWN": row[1] for row in cursor.fetchall()}
+            # Bug types aggregation
+            cursor.execute('''
+                SELECT f.type, COUNT(f.id) 
+                FROM fixes f 
+                JOIN runs r ON f.run_id = r.id 
+                WHERE r.user_id=? AND r.status IN ('done', 'failed') 
+                GROUP BY f.type
+            ''', (user_id,))
+            by_bug_type = {row[0] or "UNKNOWN": row[1] for row in cursor.fetchall()}
 
-        now = datetime.now()
-        this_month = now.month
-        this_year = now.year
-        last_month_num = 12 if this_month == 1 else this_month - 1
-        last_year = this_year - 1 if this_month == 1 else this_year
+            now = datetime.now()
+            this_month = now.month
+            this_year = now.year
+            last_month_num = 12 if this_month == 1 else this_month - 1
+            last_year = this_year - 1 if this_month == 1 else this_year
 
-        this_month_prefix = f"{this_year}-{this_month:02d}"
-        last_month_prefix = f"{last_year}-{last_month_num:02d}"
+            this_month_prefix = f"{this_year}-{this_month:02d}"
+            last_month_prefix = f"{last_year}-{last_month_num:02d}"
 
-        # Monthly Success rates
-        cursor.execute('''
-            SELECT substr(timestamp, 1, 7) as month, COUNT(id), SUM(CASE WHEN ci_status = 'PASSED' THEN 1 ELSE 0 END)
-            FROM runs
-            WHERE status IN ('done', 'failed') AND substr(timestamp, 1, 7) IN (?, ?)
-            GROUP BY substr(timestamp, 1, 7)
-        ''', (this_month_prefix, last_month_prefix))
-        
-        this_month_rate = 0
-        last_month_rate = 0
-        for row in cursor.fetchall():
-            rate = (row[2] / row[1] * 100) if row[1] > 0 else 0
-            if row[0] == this_month_prefix:
-                this_month_rate = rate
-            elif row[0] == last_month_prefix:
-                last_month_rate = rate
+            # Monthly Success rates
+            cursor.execute('''
+                SELECT substr(timestamp, 1, 7) as month, COUNT(id), SUM(CASE WHEN ci_status = 'PASSED' THEN 1 ELSE 0 END)
+                FROM runs
+                WHERE user_id=? AND status IN ('done', 'failed') AND substr(timestamp, 1, 7) IN (?, ?)
+                GROUP BY substr(timestamp, 1, 7)
+            ''', (user_id, this_month_prefix, last_month_prefix))
+            
+            this_month_rate = 0
+            last_month_rate = 0
+            for row in cursor.fetchall():
+                rate = (row[2] / row[1] * 100) if row[1] > 0 else 0
+                if row[0] == this_month_prefix:
+                    this_month_rate = rate
+                elif row[0] == last_month_prefix:
+                    last_month_rate = rate
 
-        # By Day grouping using python for last 7 days bounded calculation
-        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        by_day = {day_names[(now.weekday() - i) % 7]: {"runs": 0, "fixes": 0} for i in range(6, -1, -1)}
-        
-        fallback_epoch_ts = time.time() - 7 * 86400
+            # By Day grouping using python for last 7 days bounded calculation
+            day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            by_day = {day_names[(now.weekday() - i) % 7]: {"runs": 0, "fixes": 0} for i in range(6, -1, -1)}
+            
+            fallback_epoch_ts = time.time() - 7 * 86400
 
-        cursor.execute('''
-            SELECT timestamp, errors_fixed FROM runs 
-            WHERE status IN ('done', 'failed') 
-            AND (start_time >= ? OR start_time IS NULL)
-        ''', (fallback_epoch_ts,))
+            cursor.execute('''
+                SELECT timestamp, errors_fixed FROM runs 
+                WHERE user_id=? AND status IN ('done', 'failed') 
+                AND (start_time >= ? OR start_time IS NULL)
+            ''', (user_id, fallback_epoch_ts))
 
-        for row in cursor.fetchall():
-            ts, r_fixes = row
-            try:
-                if ts:
-                    dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
-                    if (now - dt).days <= 7:
-                        dn = day_names[dt.weekday()]
-                        if dn in by_day:
-                            by_day[dn]["runs"] += 1
-                            by_day[dn]["fixes"] += (r_fixes or 0)
-            except Exception:
-                pass
-
-        conn.close()
-        
-        return {
-            "totalRuns": total_runs,
-            "successRate": round((passed / total_runs * 100) if total_runs > 0 else 0, 1),
-            "totalFixes": total_fixes,
-            "avgFixTime": round(avg_time, 1),
-            "byBugType": by_bug_type,
-            "thisMonth": round(this_month_rate, 1),
-            "lastMonth": round(last_month_rate, 1),
-            "byDay": by_day
-        }
+            for row in cursor.fetchall():
+                ts, r_fixes = row
+                try:
+                    if ts:
+                        dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+                        if (now - dt).days <= 7:
+                            dn = day_names[dt.weekday()]
+                            if dn in by_day:
+                                by_day[dn]["runs"] += 1
+                                by_day[dn]["fixes"] += (r_fixes or 0)
+                except Exception:
+                    pass
+            
+            return {
+                "totalRuns": total_runs,
+                "successRate": round((passed / total_runs * 100) if total_runs > 0 else 0, 1),
+                "totalFixes": total_fixes,
+                "avgFixTime": round(avg_time, 1),
+                "byBugType": by_bug_type,
+                "thisMonth": round(this_month_rate, 1),
+                "lastMonth": round(last_month_rate, 1),
+                "byDay": by_day
+            }
+        finally:
+            conn.close()
     except Exception as e:
         import traceback
         traceback.print_exc()
