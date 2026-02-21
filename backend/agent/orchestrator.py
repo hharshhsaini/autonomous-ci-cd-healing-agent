@@ -43,29 +43,29 @@ def route_after_fix(state: AgentState) -> str:
     """Route from fix node - if all fixes failed, end workflow."""
     if state.get("status") == "failed":
         return END
-    if state.get("status") == "quota_reached":
-        return "push"
+    if state.get("status") == "quota_reached" or state.get("status") == "awaiting_review":
+        return END
     return "verify"
 
 builder.add_conditional_edges("fix", route_after_fix, {
     "verify": "verify",
-    "push": "push",
     END: END
 })
 
 # Conditional routing from verify
 def route_after_verify(state: AgentState) -> str:
-    """Route from verify node - either retry fix or push."""
+    """Route from verify node - either retry fix or await review."""
     if state["status"] == "fixing":
         return "fix"
-    return "push"
+    return END
 
 builder.add_conditional_edges("verify", route_after_verify, {
     "fix": "fix",
-    "push": "push"
+    END: END
 })
 
-builder.add_edge("push", END)
+# Push node is now intentionally disconnected from the automatic loop. 
+# It will be called explicitly by a new manual API endpoint when the user hits 'Push Checked Files'
 
 # Compile the graph
 compiled_graph = builder.compile()
@@ -119,8 +119,45 @@ class HealingOrchestrator:
                 # Update jobs dict so SSE can stream it
                 self.jobs[self.job_id].update(updated)
                 print(f"[{self.job_id}] Node '{node_name}' completed — status: {self.jobs[self.job_id].get('status')}")
+                
+            # Keep job open in memory if it requires human review
+            if self.jobs[self.job_id].get("status") == "awaiting_review":
+                print(f"[{self.job_id}] Pipeline paused: awaiting user review.")
+                
         except Exception as e:
             self.jobs[self.job_id]["status"] = "failed"
             self.jobs[self.job_id]["error_message"] = str(e)
             import traceback
             traceback.print_exc()
+
+def execute_review_push(job_id: str, jobs_store: dict, declined_files: list) -> dict:
+    """Executes the final push step manually after user review."""
+    if job_id not in jobs_store:
+        raise ValueError(f"Job {job_id} not found entirely in active memory.")
+        
+    state = jobs_store[job_id]
+    if state["status"] != "awaiting_review":
+        raise ValueError(f"Job {job_id} is in status {state['status']}, not awaiting_review.")
+        
+    state["status"] = "pushing"
+    state["progress"] = 92
+    state["current_agent"] = "Git Push Agent"
+    state["timeline"].append({
+        "agent": "Review Agent",
+        "msg": f"User review complete. Declined {len(declined_files)} files. Proceeding to push...",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "iteration": state["retry_count"],
+        "passed": True
+    })
+    
+    # We will let the push_node handle the actual physical git logic and job finalization!
+    # Update state via direct invocation
+    from .nodes.push_node import push_to_branch
+    
+    # Track the declined files specifically to tell push node to revert them
+    state["declined_files"] = declined_files
+    
+    final_output = push_to_branch(state)
+    jobs_store[job_id].update(final_output)
+    print(f"[{job_id}] Final Push executed.")
+    return jobs_store[job_id]

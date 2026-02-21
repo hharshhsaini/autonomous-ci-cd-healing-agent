@@ -108,6 +108,25 @@ export async function getRunResults(jobId) {
 }
 
 /**
+ * Submit manual review choices — POST /api/push/{jobId}
+ */
+export async function submitReview(jobId, declinedFiles = []) {
+  const res = await fetch(`${getApiUrl()}/api/push/${jobId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ declined_files: declinedFiles }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Review submission failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
  * Get all completed runs — GET /api/runs
  */
 export async function getRuns() {

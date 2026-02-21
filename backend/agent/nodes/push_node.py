@@ -65,6 +65,40 @@ def push_to_branch(state: AgentState) -> Dict:
         # Open repo
         repo = git.Repo(state["repo_path"])
         
+        # Handle reverted/declined files
+        declined_files = state.get("declined_files", [])
+        if declined_files:
+            print(f"[PUSH] Reverting {len(declined_files)} user-declined files to clean state...")
+            for f in declined_files:
+                try:
+                    repo.git.checkout("HEAD", "--", f)
+                    print(f"[PUSH] ✓ Reverted: {f}")
+                except Exception as rev_err:
+                    print(f"[PUSH] ✗ Revert failed for {f}: {rev_err}")
+
+            # Filter out declined files from the fixes_applied list so we don't commit them
+            fixes_applied = [fix for fix in fixes_applied if fix["file"] not in declined_files]
+            
+            # If everything was declined, exit push smoothly
+            if not fixes_applied:
+                return {
+                    "status": "done",
+                    "progress": 100,
+                    "branch_name": safe_branch,
+                    "score": state.get("score", {}),
+                    "commit_count": 0,
+                    "verify_passed": state.get("verify_passed", False),
+                    "ci_status": "SKIPPED",
+                    "push_success": True,
+                    "timeline": state.get("timeline", []) + [{
+                        "agent": "Git Push Agent",
+                        "msg": "All AI fixes were declined by user. Push cancelled.",
+                        "timestamp": datetime.now().isoformat(),
+                        "iteration": state.get("retry_count", 0),
+                        "passed": True
+                    }]
+                }
+        
         # Configure git identity
         repo.config_writer().set_value("user", "name", "RIFT AI Agent").release()
         repo.config_writer().set_value("user", "email", "agent@rift2026.ai").release()

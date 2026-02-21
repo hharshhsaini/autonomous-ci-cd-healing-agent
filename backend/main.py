@@ -246,6 +246,46 @@ async def get_client_id():
         return JSONResponse(status_code=500, content={"detail": "OAuth not configured"})
     return {"client_id": client_id}
 
+# ─── Human in the Loop Review ─────────────────────────────────────
+
+class ReviewRequest(BaseModel):
+    declined_files: List[str] = []
+
+@app.post("/api/push/{job_id}")
+async def review_push(job_id: str, req: ReviewRequest, authorization: str = Header(None)):
+    """Accepts manual user review decisions, finishes the commit loop, and archives the job."""
+    if job_id not in jobs:
+        return JSONResponse(status_code=404, content={"detail": "Job not found or already archived"})
+    
+    state = jobs[job_id]
+    if state.get("status") != "awaiting_review":
+        return JSONResponse(status_code=400, content={"detail": f"Job is in state {state.get('status')}, not awaiting_review"})
+    
+    # Check auth matches job owner
+    if authorization:
+        from database import get_user_by_token
+        token = authorization.replace("Bearer ", "").replace("token ", "")
+        user = get_user_by_token(token)
+        if user and user["id"] != state.get("user_id", 1):
+             return JSONResponse(status_code=403, content={"detail": "Unauthorized: Cannot push another user's job"})
+
+    try:
+        from agent.orchestrator import execute_review_push
+        print(f"[API] Received review for {job_id} - {len(req.declined_files)} files declined")
+        
+        # Execute the manual push graph extension
+        execute_review_push(job_id, jobs, req.declined_files)
+        
+        # Now archive the finished job into the database
+        archive_job(job_id)
+        
+        return {"status": "success", "jobs_archived": True}
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
 # ─── Run Agent ────────────────────────────────────────────────────
 
 @app.post("/api/run-agent")
@@ -437,8 +477,12 @@ def run_pipeline(job_id: str, req: RunRequest, branch: str, github_token: str):
         print(f"Pipeline error for {job_id}: {e}")
         import traceback
         traceback.print_exc()
-    finally:
+        # Archive immediately if it crashed
         archive_job(job_id)
+    finally:
+        # NOTE: If we are awaiting review, we MUST NOT archive yet! The frontend still needs to interact with the raw jobs dict
+        if job_id in jobs and jobs[job_id].get("status") not in ("awaiting_review", "queued", "cloning", "testing", "analyzing", "fixing", "verifying", "pushing"):
+            archive_job(job_id)
 
 @app.get("/api/health")
 async def health():

@@ -13,12 +13,12 @@ def verify_fixes(state: AgentState) -> Dict:
         print(f"[VERIFY] ✓ Repository is clean - no errors detected")
         return {
             "verify_passed": True,
-            "status": "pushing",
+            "status": "awaiting_review",
             "progress": 92,
-            "current_agent": "Git Push Agent",
+            "current_agent": "Review Agent",
             "timeline": state["timeline"] + [{
                 "agent": "Verify Agent",
-                "msg": "Repository is already clean — no errors detected",
+                "msg": "Repository is already clean — no errors detected. Awaiting final review.",
                 "timestamp": datetime.now().isoformat(),
                 "iteration": 0,
                 "passed": True
@@ -158,9 +158,9 @@ def verify_fixes(state: AgentState) -> Dict:
     if passed:
         return {
             "verify_passed": True,
-            "status": "pushing",
+            "status": "awaiting_review",
             "progress": 92,
-            "current_agent": "Git Push Agent",
+            "current_agent": "Review Agent",
             "timeline": state["timeline"] + [timeline_event]
         }
     elif state["retry_count"] < state["retry_limit"]:
@@ -178,8 +178,8 @@ def verify_fixes(state: AgentState) -> Dict:
         # Max retries hit — push whatever was fixed
         return {
             "verify_passed": False,
-            "status": "pushing",
+            "status": "awaiting_review",
             "progress": 92,
-            "current_agent": "Git Push Agent",
+            "current_agent": "Review Agent",
             "timeline": state["timeline"] + [timeline_event]
         }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getRunResults } from "../utils/api";
+import { getRunResults, submitReview } from "../utils/api";
 import { useAgentStream } from "../hooks/useAgentStream";
 import { formatTime } from "../utils/formatters";
 import DiffViewer from "../components/DiffViewer";
@@ -75,6 +76,10 @@ export default function ResultsPage({ runId, setScreen }) {
   const { data: streamData, isComplete } = useAgentStream(runId);
   const [visibleItems, setVisibleItems] = useState(50);
 
+  // Review System State
+  const [declinedFiles, setDeclinedFiles] = useState(new Set());
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+
   useEffect(() => {
     if (!runId) {
       setLoading(false);
@@ -113,6 +118,31 @@ export default function ResultsPage({ runId, setScreen }) {
     const iv = setInterval(tick, 1000);
     return () => clearInterval(iv);
   }, [run?.status, run?.start_time]);
+
+  // Handle Review Actions
+  const toggleFileDecline = (file) => {
+    setDeclinedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(file)) next.delete(file);
+      else next.add(file);
+      return next;
+    });
+  };
+
+  const handlePushCheckedFiles = async () => {
+    try {
+      setIsSubmittingReview(true);
+      await submitReview(runId, Array.from(declinedFiles));
+
+      // Assume stream or polling will catch the 'pushing' status automatically
+      // But we can locally optimistically update
+      setRun(prev => ({ ...prev, status: "pushing", current_agent: "Git Push Agent" }));
+    } catch (err) {
+      alert("Failed to submit review: " + err.message);
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -448,6 +478,8 @@ export default function ResultsPage({ runId, setScreen }) {
                 `Fixing ${run.errors_found || 0} errors with GPT-4o...`}
               {run.status === "verifying" &&
                 `Re-running tests (attempt ${(run.retry_count || 0) + 1}/5)...`}
+              {run.status === "awaiting_review" &&
+                "AI Agent waiting for you to Accept or Decline changes..."}
               {run.status === "pushing" &&
                 "Committing and pushing to branch..."}
             </span>
@@ -765,6 +797,105 @@ export default function ResultsPage({ runId, setScreen }) {
               Load More Fixes ({run.fixes.length - visibleItems} remaining)
             </button>
           )}
+        </div>
+      )}
+
+      {/* Human In The Loop Review Panel */}
+      {run.status === "awaiting_review" && (
+        <div style={{ ...s.section, background: "var(--card2)", padding: "24px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+          <h3 style={{ ...s.sectionTitle, color: "#58a6ff", display: "flex", alignItems: "center", gap: "8px" }}>
+            <span className="material-icons">rate_review</span>
+            Review Required
+          </h3>
+          <p style={{ color: "var(--text-dim)", fontSize: "14px", marginBottom: "20px" }}>
+            Please review the modified files below. Accepted files will be committed and pushed to your branch. Declined files will be completely reverted and thrown away.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
+            {Array.from(new Set(run.fixes?.filter(f => f.status === "fixed").map(f => f.file) || [])).map(file => {
+              const isDeclined = declinedFiles.has(file);
+              return (
+                <div key={file} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "16px",
+                  background: isDeclined ? "rgba(248,81,73,0.05)" : "var(--card)",
+                  border: `1px solid ${isDeclined ? "rgba(248,81,73,0.3)" : "var(--border)"}`,
+                  borderRadius: "8px",
+                  transition: "all 0.2s"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span className="material-icons" style={{ color: isDeclined ? "var(--red)" : "var(--text-dim)" }}>
+                      {isDeclined ? "remove_circle_outline" : "description"}
+                    </span>
+                    <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: "13px", color: isDeclined ? "var(--text-dim)" : "var(--text)", textDecoration: isDeclined ? "line-through" : "none" }}>
+                      {file}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => { if (isDeclined) toggleFileDecline(file) }}
+                      style={{
+                        padding: "6px 16px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: "1px solid",
+                        background: !isDeclined ? "rgba(0,255,136,0.1)" : "transparent",
+                        borderColor: !isDeclined ? "var(--green)" : "var(--border)",
+                        color: !isDeclined ? "var(--green)" : "var(--text-dim)",
+                      }}>
+                      ✓ Accept
+                    </button>
+                    <button
+                      onClick={() => { if (!isDeclined) toggleFileDecline(file) }}
+                      style={{
+                        padding: "6px 16px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: "1px solid",
+                        background: isDeclined ? "rgba(248,81,73,0.1)" : "transparent",
+                        borderColor: isDeclined ? "var(--red)" : "var(--border)",
+                        color: isDeclined ? "var(--red)" : "var(--text-dim)",
+                      }}>
+                      ✗ Decline
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handlePushCheckedFiles}
+            disabled={isSubmittingReview}
+            style={{
+              width: "100%",
+              padding: "14px",
+              background: "var(--text)",
+              color: "var(--bg)",
+              border: "none",
+              borderRadius: "8px",
+              fontSize: "14px",
+              fontWeight: 600,
+              cursor: isSubmittingReview ? "not-allowed" : "pointer",
+              opacity: isSubmittingReview ? 0.7 : 1,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "8px"
+            }}>
+            {isSubmittingReview ? (
+              <><span className="rift-spinner" style={{ width: 16, height: 16, borderWidth: 2, borderTopColor: "var(--bg)" }} /> Processing...</>
+            ) : (
+              <><span className="material-icons" style={{ fontSize: 18 }}>publish</span> Push {run.fixes?.filter(f => f.status === "fixed").map(f => f.file).filter((v, i, a) => a.indexOf(v) === i).length - declinedFiles.size} Accepted Files</>
+            )}
+          </button>
         </div>
       )}
 
